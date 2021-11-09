@@ -44,6 +44,9 @@
 0000			 
 0000			 
 0000			address_vram:      EQU 0x3000 
+0000			address_vram_end:  EQU 0x3bff 
+0000			console_columns:   EQU 80 
+0000			 
 0000			sectors_per_track: EQU 40                        ; pysical sectors. CP/M sees only 10 bigger sectors 
 0000			sector_size:	   EQU 128                       ; physical sector size. Logical will be 512 for CP/M 
 0000			 
@@ -86,11 +89,20 @@
 0000			mem_fe18_active_track: EQU 0xfe18 
 0000			mem_fe19_track:        EQU 0xfe19 
 0000			 
-0000			DAT_ram_fe6c:    EQU 0xfe6c 
+0000			console_esc_mode:      EQU 0xfe6c 
+0000			console_esc_mode_disabled: EQU 0                  ; No ESC pending 
+0000			console_esc_mode_enabled:  EQU 1                  ; Next char is the ESC command 
+0000			console_esc_mode_equal:    EQU 2                  ; Next char is the first arg of the = command 
+0000			 
 0000			DAT_ram_fe6d:    EQU 0xfe6d 
-0000			RAM_fe6e_cursor: EQU 0xfe6e 
+0000			console_cursor_position: EQU 0xfe6e 
 0000			SUB_ram_fef4:    EQU 0xfef4 
-0000			DAT_ram_fe70:    EQU 0xfe70 
+0000			 
+0000			; On greek mode, the char is moved to the area if control chars that are printed as greek letters 
+0000			console_alphabet_mask:    EQU 0xfe70 
+0000			console_alphabet_ascii_mask: EQU 0x7f 
+0000			console_alphabet_greek_mask: EQU 0x1f 
+0000			 
 0000			LAB_ram_feed:    EQU 0xfeed 
 0000			 
 0000			; Some code is relocated to upper memory 
@@ -979,31 +991,42 @@
 0605			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0605			 
 0605			init_screen: 
-0605 3e 20		    LD A,0x20 
+0605			    ; ?? 
+0605 3e 20		    LD A, ' ' 
 0607 32 6d fe		    LD (DAT_ram_fe6d),A 
+060a			    ; clear screen and put the cursor at the top left 
 060a cd c4 06		    CALL console_clear_screen 
-060d 22 6e fe		    LD (RAM_fe6e_cursor),HL 
+060d 22 6e fe		    LD (console_cursor_position),HL 
+0610			    ; Disable esc mode 
 0610 af			    XOR A 
-0611 32 6c fe		    LD (DAT_ram_fe6c),A 
+0611 32 6c fe		    LD (console_esc_mode),A 
+0614			    ; ?? 
 0614 3e 17		    LD A,0x17 
 0616 d3 14		    OUT (io_14_scroll_register),A 
-0618 3e 7f		    LD A,0x7f 
-061a 32 70 fe		    LD (DAT_ram_fe70),A 
+0618			    ; Set ASCII mode 
+0618 3e 7f		    LD A,console_alphabet_ascii_mask 
+061a 32 70 fe		    LD (console_alphabet_mask),A 
 061d c9			    RET 
 061e			 
 061e			console_write_c: 
-061e 3a 6c fe		    LD A,(DAT_ram_fe6c) 
+061e			    ; char in C 
+061e			    ; Are we processing an escape sequence? 
+061e 3a 6c fe		    LD A,(console_esc_mode) 
 0621 b7			    OR A 
-0622 c2 3b 07		    JP NZ,LAB_ram_073b 
+0622 c2 3b 07		    JP NZ,process_esc_command 
+0625			    ; Is it a BELL? 
 0625 3e 07		    LD A,0x7                                                                   ; ^G, BEL 
 0627 b9			    CP C 
 0628 20 05		    JR NZ,console_write_c_cont 
+062a			    ; BELL beeps sending a 4 to the keyboard 
 062a 0e 04		    LD C,0x4 
 062c c3 88 05		    JP keyboard_out 
 062f			console_write_c_cont: 
-062f cd 22 07		    CALL set_hl_to_cursor_a_to_char_cleaned 
-0632 11 95 07		    LD DE,0x795 
+062f cd 22 07		    CALL remove_blink_and_get_cursor_position 
+0632			    ; Push console_write_end to the stack to execute on any RET 
+0632 11 95 07		    LD DE,console_write_end 
 0635 d5			    PUSH DE 
+0636			    ; Test all special chars 
 0636 79			    LD A,C 
 0637 fe 0a		    CP 0xa 
 0639 28 64		    JR Z,console_line_feed 
@@ -1016,7 +1039,7 @@
 0648 fe 0b		    CP 0xb 
 064a 28 67		    JR Z,console_up 
 064c fe 1b		    CP 0x1b 
-064e ca 35 07		    JP Z,store_1_in_fe6c 
+064e ca 35 07		    JP Z,enable_esc_mode 
 0651 fe 18		    CP 0x18 
 0653 ca fd 06		    JP Z,console_erase_to_end_of_line 
 0656 fe 17		    CP 0x17 
@@ -1027,19 +1050,25 @@
 0660 28 73		    JR Z,console_home_cursor 
 0662 fe 60		    CP 0x60 
 0664 38 04		    JR C,LAB_ram_066a 
-0666 3a 70 fe		    LD A,(DAT_ram_fe70) 
+0666			    ; Apply the alphabet mask 
+0666 3a 70 fe		    LD A,(console_alphabet_mask) 
 0669 a1			    AND C 
 066a			LAB_ram_066a: 
+066a			    ; Write the char at the cursor position 
 066a 77			    LD (HL),A 
+066b			    ; Advance the cursor 
 066b 23			    INC HL 
 066c 7d			    LD A,L 
+066d			    ; Return if we are not at the and of the line 
 066d e6 7f		    AND 0x7f 
-066f fe 50		    CP 0x50 
+066f fe 50		    CP console_columns 
 0671 d8			    RET C 
+0672			    ; We are at the end of the line CR + LF 
 0672 cd 30 07		    CALL console_carriage_return 
 0675 18 28		    JR console_line_feed 
-0677			LAB_ram_0677: 
-0677 11 ff 3b		    LD DE,0x3bff 
+0677			 
+0677			console_line_feed_cont: 
+0677 11 ff 3b		    LD DE, address_vram_end 
 067a 7a			    LD A,D 
 067b bc			    CP H 
 067c 38 04		    JR C,LAB_ram_0682 
@@ -1068,7 +1097,7 @@
 069f			console_line_feed: 
 069f 11 80 00		    LD DE,0x80 
 06a2 19			    ADD HL,DE 
-06a3 18 d2		    JR LAB_ram_0677 
+06a3 18 d2		    JR console_line_feed_cont 
 06a5			 
 06a5			console_backspace: 
 06a5 7d			    LD A,L 
@@ -1100,15 +1129,19 @@
 06c3 c9			    RET 
 06c4			 
 06c4			console_clear_screen: 
+06c4			    ; Put a space at the beginning of the screen 
+06c4			    ; and for the rest of the screen, copy the previous char (a space) 
 06c4 21 00 30		    LD HL,address_vram 
 06c7 11 01 30		    LD DE,address_vram+1 
 06ca 01 ff 0b		    LD BC,0xbff 
-06cd 36 20		    LD (HL),0x20 
+06cd 36 20		    LD (HL), ' ' 
 06cf ed b0		    LDIR 
+06d1			    ; Set the cursor to the beginning of the screen 
 06d1 21 00 30		    LD HL,address_vram 
 06d4 c9			    RET 
 06d5			 
 06d5			console_home_cursor: 
+06d5			    ; Set the cursor to the beginning of the screen 
 06d5 21 00 30		    LD HL,address_vram 
 06d8 c9			    RET 
 06d9			 
@@ -1126,14 +1159,14 @@
 06ea 5d			    LD E,L 
 06eb 54			    LD D,H 
 06ec b7			    OR A 
-06ed 21 ff 3b		    LD HL,0x3bff 
+06ed 21 ff 3b		    LD HL, address_vram_end 
 06f0 ed 52		    SBC HL,DE 
 06f2 4d			    LD C,L 
 06f3 44			    LD B,H 
 06f4 62			    LD H,D 
 06f5 6b			    LD L,E 
 06f6 13			    INC DE 
-06f7 36 20		    LD (HL),0x20 
+06f7 36 20		    LD (HL), ' ' 
 06f9 ed b0		    LDIR 
 06fb			LAB_ram_06fb: 
 06fb e1			    POP HL 
@@ -1144,7 +1177,7 @@
 06fe e6 7f		    AND 0x7f 
 0700 fe 4f		    CP 0x4f 
 0702 38 03		    JR C,console_erase_to_end_of_line_cont 
-0704 36 20		    LD (HL),0x20 
+0704 36 20		    LD (HL), ' ' 
 0706 c9			    RET 
 0707			console_erase_to_end_of_line_cont: 
 0707 e5			    PUSH HL 
@@ -1164,53 +1197,64 @@
 0719 5d			    LD E,L 
 071a 54			    LD D,H 
 071b 13			    INC DE 
-071c 36 20		    LD (HL),0x20 
+071c 36 20		    LD (HL), ' ' 
 071e ed b0		    LDIR 
 0720 e1			    POP HL 
 0721 c9			    RET 
 0722			 
-0722			set_hl_to_cursor_a_to_char_cleaned: 
-0722 2a 6e fe		    LD HL,(RAM_fe6e_cursor) 
+0722			remove_blink_and_get_cursor_position: 
+0722			    ; Get the cursor position 
+0722 2a 6e fe		    LD HL,(console_cursor_position) 
 0725 7e			    LD A,(HL) 
-0726 fe df		    CP 0xdf 
-0728 3e 20		    LD A,0x20 
+0726			    ; If the char is a blinking '_' we put back a space 
+0726 fe df		    CP '_' + 0x80 
+0728 3e 20		    LD A, ' ' 
 072a 20 01		    JR NZ,LAB_ram_072d 
 072c 77			    LD (HL),A 
 072d			LAB_ram_072d: 
+072d			    ; Remove the blink bit 
 072d cb be		    RES 0x7,(HL) 
 072f c9			    RET 
 0730			 
 0730			console_carriage_return: 
+0730			    ; Set column to 0 by clearing the 7 LS bits on the cursor position 
 0730 7d			    LD A,L 
 0731 e6 80		    AND 0x80 
 0733 6f			    LD L,A 
 0734 c9			    RET 
 0735			 
-0735			store_1_in_fe6c: 
-0735 3e 01		    LD A,0x1 
-0737 32 6c fe		    LD (DAT_ram_fe6c),A 
+0735			enable_esc_mode: 
+0735			    ; Enable esc mode, next char will be an ESC command 
+0735 3e 01		    LD A,console_esc_mode_enabled 
+0737 32 6c fe		    LD (console_esc_mode),A 
 073a c9			    RET 
 073b			 
-073b			LAB_ram_073b: 
-073b 21 a2 07		    LD HL,0x7a2 
+073b			process_esc_command: 
+073b			    ; Push the location of a RET on the stack. A RET will be another RET? 
+073b 21 a2 07		    LD HL,0x07a2 
 073e e5			    PUSH HL 
-073f 21 6c fe		    LD HL,0xfe6c 
-0742 36 00		    LD (HL),0x0 
+073f			    ; disable esc mode 
+073f 21 6c fe		    LD HL,console_esc_mode 
+0742 36 00		    LD (HL), console_esc_mode_disabled 
+0744			    ; 
 0744 fe 01		    CP 0x1 
 0746 20 19		    JR NZ,LAB_ram_0761 
+0748			    ; Load the char in A with the upper bit cleared (no blink) 
 0748 79			    LD A,C 
 0749 cb bf		    RES 0x7,A 
-074b fe 47		    CP 0x47 
-074d 28 54		    JR Z,store_1f_in_fe70 
-074f fe 41		    CP 0x41 
-0751 28 56		    JR Z,store_7f_in_fe70 
-0753 fe 52		    CP 0x52 
+074b fe 47		    CP 'G' 
+074d 28 54		    JR Z, esc_set_greek_mode 
+074f fe 41		    CP 'A' 
+0751 28 56		    JR Z,esc_set_ascii_mode 
+0753 fe 52		    CP 'R' 
 0755 28 58		    JR Z,LAB_ram_07af 
-0757 fe 45		    CP 0x45 
+0757 fe 45		    CP 'E' 
 0759 28 66		    JR Z,LAB_ram_07c1 
-075b fe 3d		    CP 0x3d 
+075b fe 3d		    CP '=' 
+075d			    ;  Not an ESC command, we ignore the char and return 
 075d c0			    RET NZ 
-075e 36 02		    LD (HL),0x2 
+075e			    ; Command is '=', we set that mode  
+075e 36 02		    LD (HL),console_esc_mode_equal 
 0760 c9			    RET 
 0761			 
 0761			LAB_ram_0761: 
@@ -1223,7 +1267,7 @@
 076c			LAB_ram_076c: 
 076c fe 03		    CP 0x3 
 076e c0			    RET NZ 
-076f cd 22 07		    CALL set_hl_to_cursor_a_to_char_cleaned 
+076f cd 22 07		    CALL remove_blink_and_get_cursor_position 
 0772 e1			    POP HL 
 0773 21 00 30		    LD HL,address_vram 
 0776 79			    LD A,C 
@@ -1244,30 +1288,36 @@
 078b 11 80 00		    LD DE,0x80 
 078e			 
 078e			LAB_ram_078e: 
-078e ca 95 07		    JP Z,LAB_ram_0795 
+078e ca 95 07		    JP Z,console_write_end 
 0791 19			    ADD HL,DE 
 0792 3d			    DEC A 
 0793 18 f9		    JR LAB_ram_078e 
 0795			 
-0795			LAB_ram_0795: 
+0795			console_write_end: 
+0795			    ; Finish the console_write and enable blink at the cursos position 
+0795			    ; HL has the cursor position 
+0795			    ; Get the char under the cursos 
 0795 7e			    LD A,(HL) 
+0796			    ; If it is a space, we write a blinking '_' 
 0796 fe 20		    CP 0x20 
-0798 20 02		    JR NZ,LAB_ram_079c 
-079a 3e df		    LD A,0xdf 
-079c			LAB_ram_079c: 
+0798 20 02		    JR NZ, console_write_end_cont 
+079a 3e df		    LD A,'_' + 0x80 
+079c			console_write_end_cont: 
+079c			    ; Set the upper bit of the char to blink 
 079c cb ff		    SET 0x7,A 
 079e 77			    LD (HL),A 
-079f 22 6e fe		    LD (RAM_fe6e_cursor),HL 
+079f			    ; Store the cursor position 
+079f 22 6e fe		    LD (console_cursor_position),HL 
 07a2 c9			    RET 
 07a3			 
-07a3			store_1f_in_fe70: 
-07a3 3e 1f		    LD A,0x1f 
-07a5 32 70 fe		    LD (DAT_ram_fe70),A 
+07a3			esc_set_greek_mode: 
+07a3 3e 1f		    LD A,console_alphabet_greek_mask 
+07a5 32 70 fe		    LD (console_alphabet_mask),A 
 07a8 c9			    RET 
 07a9			 
-07a9			store_7f_in_fe70: 
-07a9 3e 7f		    LD A,0x7f 
-07ab 32 70 fe		    LD (DAT_ram_fe70),A 
+07a9			esc_set_ascii_mode: 
+07a9 3e 7f		    LD A,console_alphabet_ascii_mask 
+07ab 32 70 fe		    LD (console_alphabet_mask),A 
 07ae c9			    RET 
 07af			 
 07af			LAB_ram_07af: 
@@ -1280,14 +1330,14 @@
 07b8 21 80 3b		    LD HL,0x3b80 
 07bb cd fd 06		    CALL console_erase_to_end_of_line 
 07be e1			    POP HL 
-07bf 18 d4		    JR LAB_ram_0795 
+07bf 18 d4		    JR console_write_end 
 07c1			 
 07c1			LAB_ram_07c1: 
 07c1 e1			    POP HL 
 07c2 cd d8 07		    CALL FUN_ram_07d8 
 07c5 d5			    PUSH DE 
 07c6 28 08		    JR Z,LAB_ram_07d0 
-07c8 11 ff 3b		    LD DE,0x3bff 
+07c8 11 ff 3b		    LD DE, address_vram_end 
 07cb 21 7f 3b		    LD HL,0x3b7f 
 07ce ed b8		    LDDR 
 07d0			LAB_ram_07d0: 
@@ -1295,10 +1345,10 @@
 07d1 e5			    PUSH HL 
 07d2 cd fd 06		    CALL console_erase_to_end_of_line 
 07d5 e1			    POP HL 
-07d6 18 bd		    JR LAB_ram_0795 
+07d6 18 bd		    JR console_write_end 
 07d8			 
 07d8			FUN_ram_07d8: 
-07d8 cd 22 07		    CALL set_hl_to_cursor_a_to_char_cleaned 
+07d8 cd 22 07		    CALL remove_blink_and_get_cursor_position 
 07db cd 30 07		    CALL console_carriage_return 
 07de e5			    PUSH HL 
 07df eb			    EX DE,HL 
@@ -1317,12 +1367,18 @@
 07f1 c9			    RET 
 07f2			 
 07f2			console_write_string: 
+07f2			    ; Get return address from the stack 
 07f2 e3			    EX (SP),HL 
+07f3			    ; Read the char pointed there 
 07f3 7e			    LD A,(HL) 
+07f4			    ; Increment by one the return address in the stack 
 07f4 23			    INC HL 
 07f5 e3			    EX (SP),HL 
+07f6			    ; If the char is a zero, we are done with the string and can 
+07f6			    ; return to the caller on the address past the string 
 07f6 b7			    OR A 
 07f7 c8			    RET Z 
+07f8			    ; Write the char and continue with the string 
 07f8 4f			    LD C,A 
 07f9 cd 1e 06		    CALL console_write_c 
 07fc 18 f4		    JR console_write_string 

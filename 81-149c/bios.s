@@ -43,6 +43,9 @@ system_bit_bank_mask:             EQU 0x80
 
 
 address_vram:      EQU 0x3000
+address_vram_end:  EQU 0x3bff
+console_columns:   EQU 80
+
 sectors_per_track: EQU 40                        ; pysical sectors. CP/M sees only 10 bigger sectors
 sector_size:	   EQU 128                       ; physical sector size. Logical will be 512 for CP/M
 
@@ -85,11 +88,20 @@ DAT_ram_fe17:          EQU 0xfe17                ; Disk related flags?
 mem_fe18_active_track: EQU 0xfe18
 mem_fe19_track:        EQU 0xfe19
 
-DAT_ram_fe6c:    EQU 0xfe6c
+console_esc_mode:      EQU 0xfe6c
+console_esc_mode_disabled: EQU 0                  ; No ESC pending
+console_esc_mode_enabled:  EQU 1                  ; Next char is the ESC command
+console_esc_mode_equal:    EQU 2                  ; Next char is the first arg of the = command
+
 DAT_ram_fe6d:    EQU 0xfe6d
-RAM_fe6e_cursor: EQU 0xfe6e
+console_cursor_position: EQU 0xfe6e
 SUB_ram_fef4:    EQU 0xfef4
-DAT_ram_fe70:    EQU 0xfe70
+
+; On greek mode, the char is moved to the area if control chars that are printed as greek letters
+console_alphabet_mask:    EQU 0xfe70
+console_alphabet_ascii_mask: EQU 0x7f
+console_alphabet_greek_mask: EQU 0x1f
+
 LAB_ram_feed:    EQU 0xfeed
 
 ; Some code is relocated to upper memory
@@ -978,31 +990,42 @@ lpt_output:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 init_screen:
-    LD A,0x20
+    ; ??
+    LD A, ' '
     LD (DAT_ram_fe6d),A
+    ; clear screen and put the cursor at the top left
     CALL console_clear_screen
-    LD (RAM_fe6e_cursor),HL
+    LD (console_cursor_position),HL
+    ; Disable esc mode
     XOR A
-    LD (DAT_ram_fe6c),A
+    LD (console_esc_mode),A
+    ; ??
     LD A,0x17
     OUT (io_14_scroll_register),A
-    LD A,0x7f
-    LD (DAT_ram_fe70),A
+    ; Set ASCII mode
+    LD A,console_alphabet_ascii_mask
+    LD (console_alphabet_mask),A
     RET
 
 console_write_c:
-    LD A,(DAT_ram_fe6c)
+    ; char in C
+    ; Are we processing an escape sequence?
+    LD A,(console_esc_mode)
     OR A
-    JP NZ,LAB_ram_073b
+    JP NZ,process_esc_command
+    ; Is it a BELL?
     LD A,0x7                                                                   ; ^G, BEL
     CP C
     JR NZ,console_write_c_cont
+    ; BELL beeps sending a 4 to the keyboard
     LD C,0x4
     JP keyboard_out
 console_write_c_cont:
-    CALL set_hl_to_cursor_a_to_char_cleaned
-    LD DE,0x795
+    CALL remove_blink_and_get_cursor_position
+    ; Push console_write_end to the stack to execute on any RET
+    LD DE,console_write_end
     PUSH DE
+    ; Test all special chars
     LD A,C
     CP 0xa
     JR Z,console_line_feed
@@ -1015,7 +1038,7 @@ console_write_c_cont:
     CP 0xb
     JR Z,console_up
     CP 0x1b
-    JP Z,store_1_in_fe6c
+    JP Z,enable_esc_mode
     CP 0x18
     JP Z,console_erase_to_end_of_line
     CP 0x17
@@ -1026,19 +1049,25 @@ console_write_c_cont:
     JR Z,console_home_cursor
     CP 0x60
     JR C,LAB_ram_066a
-    LD A,(DAT_ram_fe70)
+    ; Apply the alphabet mask
+    LD A,(console_alphabet_mask)
     AND C
 LAB_ram_066a:
+    ; Write the char at the cursor position
     LD (HL),A
+    ; Advance the cursor
     INC HL
     LD A,L
+    ; Return if we are not at the and of the line
     AND 0x7f
-    CP 0x50
+    CP console_columns
     RET C
+    ; We are at the end of the line CR + LF
     CALL console_carriage_return
     JR console_line_feed
-LAB_ram_0677:
-    LD DE,0x3bff
+
+console_line_feed_cont:
+    LD DE, address_vram_end
     LD A,D
     CP H
     JR C,LAB_ram_0682
@@ -1067,7 +1096,7 @@ LAB_ram_068a:
 console_line_feed:
     LD DE,0x80
     ADD HL,DE
-    JR LAB_ram_0677
+    JR console_line_feed_cont
 
 console_backspace:
     LD A,L
@@ -1099,15 +1128,19 @@ console_up:
     RET
 
 console_clear_screen:
+    ; Put a space at the beginning of the screen
+    ; and for the rest of the screen, copy the previous char (a space)
     LD HL,address_vram
     LD DE,address_vram+1
     LD BC,0xbff
-    LD (HL),0x20
+    LD (HL), ' '
     LDIR
+    ; Set the cursor to the beginning of the screen
     LD HL,address_vram
     RET
 
 console_home_cursor:
+    ; Set the cursor to the beginning of the screen
     LD HL,address_vram
     RET
 
@@ -1125,14 +1158,14 @@ console_erase_to_end_of_screen:
     LD E,L
     LD D,H
     OR A
-    LD HL,0x3bff
+    LD HL, address_vram_end
     SBC HL,DE
     LD C,L
     LD B,H
     LD H,D
     LD L,E
     INC DE
-    LD (HL),0x20
+    LD (HL), ' '
     LDIR
 LAB_ram_06fb:
     POP HL
@@ -1143,7 +1176,7 @@ console_erase_to_end_of_line:
     AND 0x7f
     CP 0x4f
     JR C,console_erase_to_end_of_line_cont
-    LD (HL),0x20
+    LD (HL), ' '
     RET
 console_erase_to_end_of_line_cont:
     PUSH HL
@@ -1163,53 +1196,64 @@ console_erase_to_end_of_line_cont:
     LD E,L
     LD D,H
     INC DE
-    LD (HL),0x20
+    LD (HL), ' '
     LDIR
     POP HL
     RET
 
-set_hl_to_cursor_a_to_char_cleaned:
-    LD HL,(RAM_fe6e_cursor)
+remove_blink_and_get_cursor_position:
+    ; Get the cursor position
+    LD HL,(console_cursor_position)
     LD A,(HL)
-    CP 0xdf
-    LD A,0x20
+    ; If the char is a blinking '_' we put back a space
+    CP '_' + 0x80
+    LD A, ' '
     JR NZ,LAB_ram_072d
     LD (HL),A
 LAB_ram_072d:
+    ; Remove the blink bit
     RES 0x7,(HL)
     RET
 
 console_carriage_return:
+    ; Set column to 0 by clearing the 7 LS bits on the cursor position
     LD A,L
     AND 0x80
     LD L,A
     RET
 
-store_1_in_fe6c:
-    LD A,0x1
-    LD (DAT_ram_fe6c),A
+enable_esc_mode:
+    ; Enable esc mode, next char will be an ESC command
+    LD A,console_esc_mode_enabled
+    LD (console_esc_mode),A
     RET
 
-LAB_ram_073b:
-    LD HL,0x7a2
+process_esc_command:
+    ; Push the location of a RET on the stack. A RET will be another RET?
+    LD HL,0x07a2
     PUSH HL
-    LD HL,0xfe6c
-    LD (HL),0x0
+    ; disable esc mode
+    LD HL,console_esc_mode
+    LD (HL), console_esc_mode_disabled
+    ;
     CP 0x1
     JR NZ,LAB_ram_0761
+    ; Load the char in A with the upper bit cleared (no blink)
     LD A,C
     RES 0x7,A
-    CP 0x47
-    JR Z,store_1f_in_fe70
-    CP 0x41
-    JR Z,store_7f_in_fe70
-    CP 0x52
+    CP 'G'
+    JR Z, esc_set_greek_mode
+    CP 'A'
+    JR Z,esc_set_ascii_mode
+    CP 'R'
     JR Z,LAB_ram_07af
-    CP 0x45
+    CP 'E'
     JR Z,LAB_ram_07c1
-    CP 0x3d
+    CP '='
+    ;  Not an ESC command, we ignore the char and return
     RET NZ
-    LD (HL),0x2
+    ; Command is '=', we set that mode 
+    LD (HL),console_esc_mode_equal
     RET
 
 LAB_ram_0761:
@@ -1222,7 +1266,7 @@ LAB_ram_0761:
 LAB_ram_076c:
     CP 0x3
     RET NZ
-    CALL set_hl_to_cursor_a_to_char_cleaned
+    CALL remove_blink_and_get_cursor_position
     POP HL
     LD HL,address_vram
     LD A,C
@@ -1243,30 +1287,36 @@ LAB_ram_0785:
     LD DE,0x80
 
 LAB_ram_078e:
-    JP Z,LAB_ram_0795
+    JP Z,console_write_end
     ADD HL,DE
     DEC A
     JR LAB_ram_078e
 
-LAB_ram_0795:
+console_write_end:
+    ; Finish the console_write and enable blink at the cursos position
+    ; HL has the cursor position
+    ; Get the char under the cursos
     LD A,(HL)
+    ; If it is a space, we write a blinking '_'
     CP 0x20
-    JR NZ,LAB_ram_079c
-    LD A,0xdf
-LAB_ram_079c:
+    JR NZ, console_write_end_cont
+    LD A,'_' + 0x80
+console_write_end_cont:
+    ; Set the upper bit of the char to blink
     SET 0x7,A
     LD (HL),A
-    LD (RAM_fe6e_cursor),HL
+    ; Store the cursor position
+    LD (console_cursor_position),HL
     RET
 
-store_1f_in_fe70:
-    LD A,0x1f
-    LD (DAT_ram_fe70),A
+esc_set_greek_mode:
+    LD A,console_alphabet_greek_mask
+    LD (console_alphabet_mask),A
     RET
 
-store_7f_in_fe70:
-    LD A,0x7f
-    LD (DAT_ram_fe70),A
+esc_set_ascii_mode:
+    LD A,console_alphabet_ascii_mask
+    LD (console_alphabet_mask),A
     RET
 
 LAB_ram_07af:
@@ -1279,14 +1329,14 @@ LAB_ram_07b8:
     LD HL,0x3b80
     CALL console_erase_to_end_of_line
     POP HL
-    JR LAB_ram_0795
+    JR console_write_end
 
 LAB_ram_07c1:
     POP HL
     CALL FUN_ram_07d8
     PUSH DE
     JR Z,LAB_ram_07d0
-    LD DE,0x3bff
+    LD DE, address_vram_end
     LD HL,0x3b7f
     LDDR
 LAB_ram_07d0:
@@ -1294,10 +1344,10 @@ LAB_ram_07d0:
     PUSH HL
     CALL console_erase_to_end_of_line
     POP HL
-    JR LAB_ram_0795
+    JR console_write_end
 
 FUN_ram_07d8:
-    CALL set_hl_to_cursor_a_to_char_cleaned
+    CALL remove_blink_and_get_cursor_position
     CALL console_carriage_return
     PUSH HL
     EX DE,HL
@@ -1316,12 +1366,18 @@ FUN_ram_07d8:
     RET
 
 console_write_string:
+    ; Get return address from the stack
     EX (SP),HL
+    ; Read the char pointed there
     LD A,(HL)
+    ; Increment by one the return address in the stack
     INC HL
     EX (SP),HL
+    ; If the char is a zero, we are done with the string and can
+    ; return to the caller on the address past the string
     OR A
     RET Z
+    ; Write the char and continue with the string
     LD C,A
     CALL console_write_c
     JR console_write_string
