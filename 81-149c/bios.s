@@ -23,11 +23,16 @@ io_13_fdc_data:           EQU 0x13
 io_14_scroll_register:    EQU 0x14
 io_1c_system_bits:        EQU 0x1c
 
-address_vram: EQU 0x3000
+address_vram:      EQU 0x3000
+sectors_per_track: EQU 40 ; pysical sectors. CP/M sees only 10 bigger sectors
+sector_size:	   EQU 128 ; physical sector size. Logical will be 512 for CP/M
 
-ram_fa02_address_to_load_boot_sector: EQU 0xfa02
-ram_fa04_address_to_exec_boot:        EQU 0xfa04
-ram_fa06_count_of_boot_sectors:       EQU 0xfa06
+; The first boot sector has the info about
+; the rest of the boot sector loadind
+first_sector_load_address:     EQU 0xfa00
+address_to_load_second_sector: EQU 0xfa02
+address_to_exec_boot:          EQU 0xfa04
+count_of_boot_sectors_needed:  EQU 0xfa06
 
 ram_fc00_disk_for_next_access:   EQU 0xfc00
 ram_fc01_track_for_next_access:  EQU 0xfc01
@@ -67,11 +72,12 @@ DAT_ram_fe70:    EQU 0xfe70
 LAB_ram_feed:    EQU 0xfeed
 
 ; Some code is relocated to upper memory
+disk_params_destination: EQU 0xfe71
 relocation_destination:  EQU 0xfecd
-relocation_offset: EQU 0xfecd - 0x04a8 ; relocation_destination - block_to_relocate_to_fecd
-read_in_DMA_relocated: EQU 0xfedc ; reloc_read_in_DMA + relocation_offset
-move_RAM_relocated: EQU 0xfecd ; reloc_move_RAM + relocation_offset
-read_to_upper_relocated: EQU 0xfee3 ; reloc_read_to_upper + relocation_offset
+relocation_offset:       EQU 0xfecd - 0x04a8 ; relocation_destination - block_to_relocate_to_fecd
+read_in_DMA_relocated:   EQU 0xfedc          ; reloc_read_in_DMA + relocation_offset
+move_RAM_relocated:      EQU 0xfecd          ; reloc_move_RAM + relocation_offset
+read_to_upper_relocated: EQU 0xfee3          ; reloc_read_to_upper + relocation_offset
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; BIOS ENTRY POINTS
@@ -117,39 +123,44 @@ cold_boot:
 	CALL init_ports
 	CALL init_screen
 	CALL init_upper_RAM
-	JR cold_boot_continue
+	JR cold_boot_continue                        ; Avoid the NMI entry point at 0x0066
 	DB 0x3D, 0, 0, 0, 0, 0, 0
 nmi_isr:
-	RET
+	RET                                          ; Just return from the interrupts generated
+	                                             ; by the floppy controller
 
 cold_boot_continue:
-	CALL console_write_string
-	DB 1Bh,"=*?"
+	CALL console_write_string                    ; console_write_string gets the zero terminated
+	                                             ; string after the CALL
+	DB 1Bh,"=", 0x20 + 0xa, 0x20 + 0x1f          ; ESC code, move to line 10, column 31
 	DB "*    KAYPRO II    *"
-	DB 1Bh,"=-4"
-	DB " Please place your diskette into Drive A",8h
-	DB 0
+	DB 1Bh,"=", 0x20 + 0xd, 0x20 + 0x14          ; ESC code, move to line 13, column 20
+	DB " Please place your diskette into Drive A"
+	DB 0x8                                       ; Cursor
+	DB 0  									     ; End string
+
 	LD C,0x0
 	CALL set_disk_for_next_access
 	LD BC,0x0
 	CALL set_track_for_next_access
 	LD C,0x0
 	CALL set_sector_for_next_access
-	LD BC,0xfa00
+	LD BC, first_sector_load_address
 	CALL set_DMA_address_for_next_access
-	CALL read_sector
+	CALL read_sector                             ; Read the first sector
 	DI
 	OR A
 	JR NZ,error_bad_disk
-	LD BC,(ram_fa02_address_to_load_boot_sector)
+	LD BC,(address_to_load_second_sector)        ; Use the info from the first sector to continue
 	LD (ram_fc14_DMA_address),BC
-	LD BC,(ram_fa04_address_to_exec_boot)
+	LD BC,(address_to_exec_boot)                 ; Store the boot exec addres on the stack. A RET will jump there
 	PUSH BC
-	LD BC,(ram_fa06_count_of_boot_sectors)
+	LD BC,(count_of_boot_sectors_needed)
 	LD B,C
-	LD C,0x1
+	LD C,0x1                                     ; Continue reading from sector 1
 read_another_boot_sector:
-	PUSH BC
+	PUSH BC                                      ; B has the count of sectors remaining
+	                                             ; C has the current sector number
 	CALL set_sector_for_next_access
 	CALL read_sector
 	DI
@@ -157,18 +168,18 @@ read_another_boot_sector:
 	OR A
 	JR NZ,error_bad_disk
 	LD HL,(ram_fc14_DMA_address)
-	LD DE,0x80
-	ADD HL,DE
+	LD DE, sector_size
+	ADD HL,DE                                    ; Increase by 128 the load address (sector size is 128 bytes)??
 	LD (ram_fc14_DMA_address),HL
 	DEC B
-	RET Z
+	RET Z                                        ; Done. Jump to the boot exec address previously pushed
 	INC C
-	LD A,0x28
-	CP C
+	LD A, sectors_per_track
+	CP C                                         ; Check if we have to go to the next track
 	JR NZ,read_another_boot_sector
-	LD C,0x10
+	LD C,0x10                                    ; Track 0 completed. Continue with sector 1, track 10
 	PUSH BC
-	LD BC,0x1
+	LD BC,0x0001                                 ; Sector 1
 	CALL set_track_for_next_access
 	POP BC
 	JR read_another_boot_sector
@@ -177,21 +188,22 @@ error_bad_disk:
 	DB "\n\r\n\r\aI cannot read your diskette.",0
 	CALL turn_off_motor
 wait_forever:
-	JR wait_forever
+	JR wait_forever                              ; Lock the CPU	
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; COPY CODE AND DATA TO UPPER RAM
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+disk_params:                                     ; This data will be copied to 0xfe71 
 init_data_drive_0:
 	DB 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
- DB 0x73, 0xFF, 0xA2, 0xFE, 0x1A, 0xFE, 0x2A, 0xFE
+	DB 0x73, 0xFF, 0xA2, 0xFE, 0x1A, 0xFE, 0x2A, 0xFE
 	DB 0x00
 init_data_drive_1:
- DB 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+	DB 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 	DB 0x73, 0xFF, 0xA2, 0xFE, 0x43, 0xFE, 0x53, 0xFE
 	DB 0x00
-init_data_rest:
+init_data_rest:                                  ; Purpose?
 	DB 0x12, 0x00, 0x03, 0x07, 0x00, 0x52, 0x00, 0x1F
 	DB 0x00, 0x80, 0x00, 0x08, 0x00, 0x03, 0x00, 0x28
 	DB 0x00, 0x03, 0x07, 0x00, 0xC2, 0x00, 0x3F, 0x00
@@ -204,11 +216,13 @@ init_upper_RAM:
 	LD DE,relocation_destination
 	LD BC,0x87
 	LDIR
-	LD HL,init_data_drive_0
-	LD DE,0xfe71
+
+	LD HL, disk_params                    
+	LD DE, disk_params_destination
 	LD BC,0x52
 	LDIR
-	XOR A
+
+	XOR A                                        ; Init some variables
 	LD (DAT_ram_fc09),A
 	LD (DAT_ram_fc0b),A
 	LD A,0x0
