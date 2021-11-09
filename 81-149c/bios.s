@@ -24,8 +24,10 @@ io_14_scroll_register:    EQU 0x14
 io_1c_system_bits:        EQU 0x1c
 
 address_vram:      EQU 0x3000
-sectors_per_track: EQU 40 ; pysical sectors. CP/M sees only 10 bigger sectors
-sector_size:	   EQU 128 ; physical sector size. Logical will be 512 for CP/M
+sectors_per_track: EQU 40                        ; pysical sectors. CP/M sees only 10 bigger sectors
+sector_size:	   EQU 128                       ; physical sector size. Logical will be 512 for CP/M
+
+RET_opcode:	       EQU 0xC9                      ; RET, used to set the NMI_ISR when the ROM is disabled
 
 ; The first boot sector has the info about
 ; the rest of the boot sector loadind
@@ -98,9 +100,9 @@ ORG	0h
     JP sector_translation
     JP turn_on_motor
     JP turn_off_motor
-    JP is_key_pressed
-    JP get_key
-    JP console_bell
+    JP is_key_pressed                            ; return 0 or FF in A
+    JP get_key                                   ; return char in A
+    JP keyboard_out                              ; char in C, used for the bell
     JP is_serial_byte_ready
     JP get_byte_from_serial
     JP serial_out
@@ -678,10 +680,13 @@ go_to_track_sector:
 
 block_to_relocate_to_fecd:
 reloc_move_RAM:
+    ; Hide the ROM
     IN A,(io_1c_system_bits)
     RES 0x7,A
     OUT (io_1c_system_bits),A
+    ; Copy the bytes
     LDIR
+    ; Shot the ROM
     IN A,(io_1c_system_bits)
     SET 0x7,A
     OUT (io_1c_system_bits),A
@@ -708,17 +713,22 @@ reloc_write_internal:
 reloc_RW_internal:
     CALL fdc_ensure_ready
     DI
+    ; Hide the ROM
     IN A,(io_1c_system_bits)
     RES 0x7,A
     OUT (io_1c_system_bits),A
+    ; Setup RET as the handler of NMI
+    ; as the ROM is paged out, there is no handler
+    ; Store the previous value to restore it later
     PUSH HL
-    LD HL,0x0066								;nmi_isr
+    LD HL, nmi_isr
     LD A,(HL)
     EX AF,AF'
-    LD (HL),0xc9
+    LD (HL), RET_opcode
     POP HL
+
     LD A,B
-    LD BC,0x8013
+    LD BC, sector_size * 0x100 + io_13_fdc_data  ; Setup of the INI command
     BIT 0x0,A
     JR NZ,LAB_ram_04f4
     LD B,0x0
@@ -733,11 +743,11 @@ LAB_ram_04f4:
     JR Z,reloc_read_second_half_of_sector
 reloc_read_first_half_of_sector:
     HALT
-    INI
+    INI                                          ; IN from io_13_fdc_data
     JR NZ,reloc_read_first_half_of_sector
 reloc_read_second_half_of_sector:
     HALT
-    INI
+    INI                                          ; IN from io_13_fdc_data
     JR NZ,reloc_read_second_half_of_sector
     JR read_sector_completed
 reloc_write_sector:
@@ -746,20 +756,24 @@ reloc_write_sector:
     JR Z,reloc_write_second_half_of_sector
 reloc_write_first_half_of_sector:
     HALT
-    OUTI
+    OUTI                                         ; OUT to io_13_fdc_data
     JR NZ,reloc_write_first_half_of_sector
 reloc_write_second_half_of_sector:
     HALT
-    OUTI
+    OUTI                                         ; OUT to io_13_fdc_data
     JR NZ,reloc_write_second_half_of_sector
 read_sector_completed:
+    ; Restore the byte that was on the NMI handler
     EX AF,AF'
     LD (nmi_isr),A
+    ; Restore the ROM
     IN A,(io_1c_system_bits)
     SET 0x7,A
     OUT (io_1c_system_bits),A
     EI
+    ; Wait for the disk access result code
     CALL fdc_halt
+    ; Return the result code: 0 or 1
     AND D
     RET Z
     LD A,0x1
@@ -773,6 +787,7 @@ read_sector_completed:
 init_ports_count:
     DB 0x1C
 init_ports_data:
+    ; The first byte is the value to OUT on the port given by the second byte
     DW 0x1807
     DW 0x050C
     DW 0x0407
@@ -809,7 +824,7 @@ init_port_loop:
     LD C,(HL)
     INC HL
     LD A,(HL)
-    OUT (C),A
+    OUT (C),A                                    ; An out for each pair of bytes in init_ports_data
     DJNZ init_port_loop
     RET
 
@@ -818,40 +833,48 @@ init_port_loop:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 is_key_pressed:
+    ; return 0 or FF in A
     IN A,(io_07_keyboard_control)
     AND 0x1
     RET Z
     LD A,0xff
     RET
+
 get_key:
+    ; return char in A
     CALL is_key_pressed
     JR Z,get_key
     IN A,(io_05_keyboard_data)
     CALL translate_keyboard_in_a
     RET
-console_bell:
+
+keyboard_out:
+    ; char in C. C=4 for the bell.
     IN A,(io_07_keyboard_control)
     AND 0x4
-    JR Z,console_bell
+    JR Z,keyboard_out                            ; Loop until the keyboard is ready
     LD A,C
     OUT (io_05_keyboard_data),A
     RET
+
 translate_keyboard_in_a:
-    LD HL,0x5a7
-    LD BC,0x13
+    LD HL,translate_keyboard_keys
+    LD BC,translate_keyboard_size
     CPIR
-    RET NZ
-    LD DE,0x5a7
+    RET NZ                                       ; Return the key not trasnlated
+    ; key found, replace with the corresponding char
+    LD DE,translate_keyboard_keys
     OR A
     SBC HL,DE
-    LD DE,0x5b9
+    LD DE,translate_keyboard_values
     ADD HL,DE
     LD A,(HL)
     RET
+translate_keyboard_size: EQU 0x13
 translate_keyboard_keys:
     DB 0xF1, 0xF2, 0xF3, 0xF4, 0xB1, 0xC0, 0xC1, 0xC2
     DB 0xD0, 0xD1, 0xD2, 0xE1, 0xE2, 0xE3, 0xE4, 0xD3
-    DB 0xC3, 0xB2
+    DB 0xC3, 0xB2                                ; The 0xff from the values table is used as the last key
 translate_keyboard_values:
     DB 0xFF, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86
     DB 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E
@@ -921,11 +944,11 @@ console_write_c:
     LD A,(DAT_ram_fe6c)
     OR A
     JP NZ,LAB_ram_073b
-    LD A,0x7
+    LD A,0x7                                                                   ; ^G, BEL
     CP C
     JR NZ,console_write_c_cont
     LD C,0x4
-    JP console_bell
+    JP keyboard_out
 console_write_c_cont:
     CALL set_hl_to_cursor_a_to_char_cleaned
     LD DE,0x795
