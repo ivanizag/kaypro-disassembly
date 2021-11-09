@@ -1,1285 +1,1335 @@
 # File bios.s
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-0000			; Analysis of the Kaypro II ROM  
-0000			;  
-0000			; Based on 81-149c.rom  
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-0000			  
-0000			  
-0000			  
-0000			  
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-0000			; CONSTANTS  
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-0000			  
-0000			io_04_serial_data:        EQU 0x04  
-0000			io_05_keyboard_data:      EQU 0x05  
-0000			io_06_serial_control:     EQU 0x06  
-0000			io_07_keyboard_control:   EQU 0x07  
-0000			DAT_io_0008:              EQU 0x08  
-0000			io_10_fdc_command_status: EQU 0x10  
-0000			io_11_fdc_track:          EQU 0x11  
-0000			io_12_fdc_sector:         EQU 0x12  
-0000			io_13_fdc_data:           EQU 0x13  
-0000			io_14_scroll_register:    EQU 0x14  
-0000			io_1c_system_bits:        EQU 0x1c  
-0000			  
-0000			address_vram:      EQU 0x3000  
-0000			sectors_per_track: EQU 40                        ; pysical sectors. CP/M sees only 10 bigger sectors  
-0000			sector_size:	   EQU 128                       ; physical sector size. Logical will be 512 for CP/M  
-0000			  
-0000			RET_opcode:	       EQU 0xC9                      ; RET, used to set the NMI_ISR when the ROM is disabled  
-0000			  
-0000			; The first boot sector has the info about  
-0000			; the rest of the boot sector loadind  
-0000			first_sector_load_address:     EQU 0xfa00  
-0000			address_to_load_second_sector: EQU 0xfa02  
-0000			address_to_exec_boot:          EQU 0xfa04  
-0000			count_of_boot_sectors_needed:  EQU 0xfa06  
-0000			  
-0000			ram_fc00_disk_for_next_access:   EQU 0xfc00  
-0000			ram_fc01_track_for_next_access:  EQU 0xfc01  
-0000			ram_fc03_sector_for_next_access: EQU 0xfc03  
-0000			  
-0000			ram_fc04_disk_xx:   EQU 0xfc04  
-0000			ram_fc05_track_xx:  EQU 0xfc05  
-0000			ram_fc07_sector_xx: EQU 0xfc07  
-0000			  
-0000			DAT_ram_fc08: EQU 0xfc08  
-0000			DAT_ram_fc09: EQU 0xfc09  
-0000			DAT_ram_fc0a: EQU 0xfc0a  
-0000			DAT_ram_fc0b: EQU 0xfc0b  
-0000			DAT_ram_fc0c: EQU 0xfc0c  
-0000			DAT_ram_fc0d: EQU 0xfc0d  
-0000			DAT_ram_fc0f: EQU 0xfc0f  
-0000			DAT_ram_fc10: EQU 0xfc10  
-0000			DAT_ram_fc11: EQU 0xfc11  
-0000			DAT_ram_fc12: EQU 0xfc12  
-0000			DAT_ram_fc13: EQU 0xfc13  
-0000			ram_fc14_DMA_address: EQU 0xfc14  
-0000			DAT_ram_fc16: EQU 0xfc16  
-0000			DAT_ram_fc17: EQU 0xfc17  
-0000			DAT_ram_fc18: EQU 0xfc18  
-0000			DAT_ram_fc19: EQU 0xfc19  
-0000			  
-0000			mem_fe16_active_disk:  EQU 0xfe16  
-0000			DAT_ram_fe17:          EQU 0xfe17  
-0000			mem_fe18_active_track: EQU 0xfe18  
-0000			mem_fe19_track:        EQU 0xfe19  
-0000			  
-0000			DAT_ram_fe6c:    EQU 0xfe6c  
-0000			DAT_ram_fe6d:    EQU 0xfe6d  
-0000			RAM_fe6e_cursor: EQU 0xfe6e  
-0000			SUB_ram_fef4:    EQU 0xfef4  
-0000			DAT_ram_fe70:    EQU 0xfe70  
-0000			LAB_ram_feed:    EQU 0xfeed  
-0000			  
-0000			; Some code is relocated to upper memory  
-0000			disk_params_destination: EQU 0xfe71  
-0000			relocation_destination:  EQU 0xfecd  
-0000			relocation_offset:       EQU 0xfecd - 0x04a8 ; relocation_destination - block_to_relocate_to_fecd  
-0000			read_in_DMA_relocated:   EQU 0xfedc          ; reloc_read_in_DMA + relocation_offset  
-0000			move_RAM_relocated:      EQU 0xfecd          ; reloc_move_RAM + relocation_offset  
-0000			read_to_upper_relocated: EQU 0xfee3          ; reloc_read_to_upper + relocation_offset  
-0000			  
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-0000			; BIOS ENTRY POINTS  
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-0000			  
-0000			ORG	0h  
-0000 c3 4b 00		    JP cold_boot  
-0003 c3 86 01		    JP init_upper_RAM  
-0006 c3 05 06		    JP init_screen  
-0009 c3 68 05		    JP init_ports  
-000c c3 d8 01		    JP fdc_restore_and_mem  
-000f c3 b4 01		    JP set_disk_for_next_access  
-0012 c3 cc 01		    JP set_track_for_next_access  
-0015 c3 bb 01		    JP set_sector_for_next_access  
-0018 c3 c7 01		    JP set_DMA_address_for_next_access  
-001b c3 ec 01		    JP read_sector  
-001e c3 07 02		    JP write_sector  
-0021 c3 e4 03		    JP sector_translation  
-0024 c3 0f 04		    JP turn_on_motor  
-0027 c3 1e 04		    JP turn_off_motor  
-002a c3 75 05		    JP is_key_pressed                            ; return 0 or FF in A  
-002d c3 7d 05		    JP get_key                                   ; return char in A  
-0030 c3 88 05		    JP keyboard_out                              ; char in C, used for the bell  
-0033 c3 cc 05		    JP is_serial_byte_ready  
-0036 c3 d2 05		    JP get_byte_from_serial  
-0039 c3 da 05		    JP serial_out  
-003c c3 ea 05		    JP lpt_status  
-003f c3 f2 05		    JP lpt_output  
-0042 c3 e4 05		    JP serial_get_control  
-0045 c3 1e 06		    JP console_write_c  
-0048 c3 25 04		    JP wait_B  
-004b			  
-004b			  
-004b			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-004b			; INITIALIZATION AND BOOT FROM DISK  
-004b			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-004b			  
-004b			cold_boot:  
-004b f3			    DI  
-004c 31 ff ff		    LD SP, 0xffff  
-004f 06 0a		    LD B, 0xa  
-0051 cd 25 04		    CALL wait_B  
-0054 cd 68 05		    CALL init_ports  
-0057 cd 05 06		    CALL init_screen  
-005a cd 86 01		    CALL init_upper_RAM  
-005d 18 08		    JR cold_boot_continue                        ; Avoid the NMI entry point at 0x0066  
-005f 3d 00 00 00 00 00 00	    DB 0x3D, 0, 0, 0, 0, 0, 0  
-0066			nmi_isr:  
-0066 c9			    RET                                          ; Just return from the interrupts generated  
-0067			                                                 ; by the floppy controller  
-0067			  
-0067			cold_boot_continue:  
-0067 cd f2 07		    CALL console_write_string                    ; console_write_string gets the zero terminated  
-006a			                                                 ; string after the CALL  
-006a 1b .. 2a 3f	    DB 1Bh,"=", 0x20 + 0xa, 0x20 + 0x1f          ; ESC code, move to line 10, column 31  
-006e ..			    DB "*    KAYPRO II    *"  
-0081 1b .. 2d 34	    DB 1Bh,"=", 0x20 + 0xd, 0x20 + 0x14          ; ESC code, move to line 13, column 20  
-0085 ..			    DB " Please place your diskette into Drive A"  
-00ad 08			    DB 0x8                                       ; Cursor  
-00ae 00			    DB 0  									     ; End string  
-00af			  
-00af 0e 00		    LD C,0x0  
-00b1 cd b4 01		    CALL set_disk_for_next_access  
-00b4 01 00 00		    LD BC,0x0  
-00b7 cd cc 01		    CALL set_track_for_next_access  
-00ba 0e 00		    LD C,0x0  
-00bc cd bb 01		    CALL set_sector_for_next_access  
-00bf 01 00 fa		    LD BC, first_sector_load_address  
-00c2 cd c7 01		    CALL set_DMA_address_for_next_access  
-00c5 cd ec 01		    CALL read_sector                             ; Read the first sector  
-00c8 f3			    DI  
-00c9 b7			    OR A  
-00ca 20 3e		    JR NZ,error_bad_disk  
-00cc ed 4b 02 fa	    LD BC,(address_to_load_second_sector)        ; Use the info from the first sector to continue  
-00d0 ed 43 14 fc	    LD (ram_fc14_DMA_address),BC  
-00d4 ed 4b 04 fa	    LD BC,(address_to_exec_boot)                 ; Store the boot exec addres on the stack. A RET will jump there  
-00d8 c5			    PUSH BC  
-00d9 ed 4b 06 fa	    LD BC,(count_of_boot_sectors_needed)  
-00dd 41			    LD B,C  
-00de 0e 01		    LD C,0x1                                     ; Continue reading from sector 1  
-00e0			read_another_boot_sector:  
-00e0 c5			    PUSH BC                                      ; B has the count of sectors remaining  
-00e1			                                                 ; C has the current sector number  
-00e1 cd bb 01		    CALL set_sector_for_next_access  
-00e4 cd ec 01		    CALL read_sector  
-00e7 f3			    DI  
-00e8 c1			    POP BC  
-00e9 b7			    OR A  
-00ea 20 1e		    JR NZ,error_bad_disk  
-00ec 2a 14 fc		    LD HL,(ram_fc14_DMA_address)  
-00ef 11 80 00		    LD DE, sector_size  
-00f2 19			    ADD HL,DE                                    ; Increase by 128 the load address (sector size is 128 bytes)??  
-00f3 22 14 fc		    LD (ram_fc14_DMA_address),HL  
-00f6 05			    DEC B  
-00f7 c8			    RET Z                                        ; Done. Jump to the boot exec address previously pushed  
-00f8 0c			    INC C  
-00f9 3e 28		    LD A, sectors_per_track  
-00fb b9			    CP C                                         ; Check if we have to go to the next track  
-00fc 20 e2		    JR NZ,read_another_boot_sector  
-00fe 0e 10		    LD C,0x10                                    ; Track 0 completed. Continue with sector 1, track 10  
-0100 c5			    PUSH BC  
-0101 01 01 00		    LD BC,0x0001                                 ; Sector 1  
-0104 cd cc 01		    CALL set_track_for_next_access  
-0107 c1			    POP BC  
-0108 18 d6		    JR read_another_boot_sector  
-010a			error_bad_disk:  
-010a cd f2 07		    CALL console_write_string  
-010d .. 00		    DB "\n\r\n\r\aI cannot read your diskette.",0  
-012f cd 1e 04		    CALL turn_off_motor  
-0132			wait_forever:  
-0132 18 fe		    JR wait_forever                              ; Lock the CPU	  
-0134			  
-0134			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-0134			; COPY CODE AND DATA TO UPPER RAM  
-0134			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-0134			  
-0134			disk_params:                                     ; This data will be copied to 0xfe71   
-0134			init_data_drive_0:  
-0134 00 00 00 00 00 00 00 00	    DB 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  
-013c 73 ff a2 fe 1a fe 2a fe	    DB 0x73, 0xFF, 0xA2, 0xFE, 0x1A, 0xFE, 0x2A, 0xFE  
-0144 00			    DB 0x00  
-0145			init_data_drive_1:  
-0145 00 00 00 00 00 00 00 00	    DB 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  
-014d 73 ff a2 fe 43 fe 53 fe	    DB 0x73, 0xFF, 0xA2, 0xFE, 0x43, 0xFE, 0x53, 0xFE  
-0155 00			    DB 0x00  
-0156			init_data_rest:                                  ; Purpose?  
-0156 12 00 03 07 00 52 00 1f	    DB 0x12, 0x00, 0x03, 0x07, 0x00, 0x52, 0x00, 0x1F  
-015e 00 80 00 08 00 03 00 28	    DB 0x00, 0x80, 0x00, 0x08, 0x00, 0x03, 0x00, 0x28  
-0166 00 03 07 00 c2 00 3f 00	    DB 0x00, 0x03, 0x07, 0x00, 0xC2, 0x00, 0x3F, 0x00  
-016e f0 00 10 00 01 00 01 06	    DB 0xF0, 0x00, 0x10, 0x00, 0x01, 0x00, 0x01, 0x06  
-0176 0b 10 03 08 0d 12 05 0a	    DB 0x0B, 0x10, 0x03, 0x08, 0x0D, 0x12, 0x05, 0x0A  
-017e 0f 02 07 0c 11 04 09 0e	    DB 0x0F, 0x02, 0x07, 0x0C, 0x11, 0x04, 0x09, 0x0E  
-0186			  
-0186			init_upper_RAM:  
-0186 21 a8 04		    LD HL,block_to_relocate_to_fecd  
-0189 11 cd fe		    LD DE,relocation_destination  
-018c 01 87 00		    LD BC,0x87  
-018f ed b0		    LDIR  
-0191			  
-0191 21 34 01		    LD HL, disk_params                      
-0194 11 71 fe		    LD DE, disk_params_destination  
-0197 01 52 00		    LD BC,0x52  
-019a ed b0		    LDIR  
-019c			  
-019c af			    XOR A                                        ; Init some variables  
-019d 32 09 fc		    LD (DAT_ram_fc09),A  
-01a0 32 0b fc		    LD (DAT_ram_fc0b),A  
-01a3 3e 00		    LD A,0x0  
-01a5 32 17 fe		    LD (DAT_ram_fe17),A  
-01a8 3e ff		    LD A,0xff  
-01aa 32 16 fe		    LD (mem_fe16_active_disk),A  
-01ad 32 18 fe		    LD (mem_fe18_active_track),A  
-01b0 32 19 fe		    LD (mem_fe19_track),A  
-01b3 c9			    RET  
-01b4			  
-01b4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-01b4			; FLOPPY DISK  
-01b4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-01b4			  
-01b4			set_disk_for_next_access:  
-01b4 79			    LD A,C  
-01b5 32 00 fc		    LD (ram_fc00_disk_for_next_access),A  
-01b8 c3 1d 03		    JP fdc_set_disk  
-01bb			set_sector_for_next_access:  
-01bb 79			    LD A,C  
-01bc 32 03 fc		    LD (ram_fc03_sector_for_next_access),A  
-01bf 3a 17 fe		    LD A,(DAT_ram_fe17)  
-01c2 b7			    OR A  
-01c3 c2 e0 03		    JP NZ,fdc_set_sector_C  
-01c6 c9			    RET  
-01c7			set_DMA_address_for_next_access:  
-01c7 ed 43 14 fc	    LD (ram_fc14_DMA_address),BC  
-01cb c9			    RET  
-01cc			set_track_for_next_access:  
-01cc ed 43 01 fc	    LD (ram_fc01_track_for_next_access),BC  
-01d0 3a 17 fe		    LD A,(DAT_ram_fe17)  
-01d3 b7			    OR A  
-01d4 c2 d4 03		    JP NZ,fdc_seek_track_C  
-01d7 c9			    RET  
-01d8			fdc_restore_and_mem:  
-01d8 3a 17 fe		    LD A,(DAT_ram_fe17)  
-01db b7			    OR A  
-01dc c2 cb 03		    JP NZ,fdc_restore  
-01df 3a 0a fc		    LD A,(DAT_ram_fc0a)  
-01e2 b7			    OR A  
-01e3 c2 e9 01		    JP NZ,LAB_ram_01e9  
-01e6 32 09 fc		    LD (DAT_ram_fc09),A  
-01e9			LAB_ram_01e9:  
-01e9 c3 cb 03		    JP fdc_restore  
-01ec			  
-01ec			read_sector:  
-01ec 3a 17 fe		    LD A,(DAT_ram_fe17)  
-01ef b7			    OR A  
-01f0 c2 dc fe		    JP NZ,read_in_DMA_relocated  
-01f3 af			    XOR A  
-01f4 32 0b fc		    LD (DAT_ram_fc0b),A  
-01f7 3e 01		    LD A,0x1  
-01f9 32 12 fc		    LD (DAT_ram_fc12),A  
-01fc 32 11 fc		    LD (DAT_ram_fc11),A  
-01ff 3e 02		    LD A,0x2  
-0201 32 13 fc		    LD (DAT_ram_fc13),A  
-0204 c3 79 02		    JP LAB_ram_0279  
-0207			write_sector:  
-0207 3a 17 fe		    LD A,(DAT_ram_fe17)  
-020a b7			    OR A  
-020b c2 ed fe		    JP NZ,LAB_ram_feed  
-020e af			    XOR A  
-020f 32 12 fc		    LD (DAT_ram_fc12),A  
-0212 79			    LD A,C  
-0213 32 13 fc		    LD (DAT_ram_fc13),A  
-0216 fe 02		    CP 0x2  
-0218 c2 32 02		    JP NZ,LAB_ram_0232  
-021b 3e 08		    LD A,0x8  
-021d 32 0b fc		    LD (DAT_ram_fc0b),A  
-0220 3a 00 fc		    LD A,(ram_fc00_disk_for_next_access)  
-0223 32 0c fc		    LD (DAT_ram_fc0c),A  
-0226 2a 01 fc		    LD HL,(ram_fc01_track_for_next_access)  
-0229 22 0d fc		    LD (DAT_ram_fc0d),HL  
-022c 3a 03 fc		    LD A,(ram_fc03_sector_for_next_access)  
-022f 32 0f fc		    LD (DAT_ram_fc0f),A  
-0232			LAB_ram_0232:  
-0232 3a 0b fc		    LD A,(DAT_ram_fc0b)  
-0235 b7			    OR A  
-0236 ca 71 02		    JP Z,LAB_ram_0271  
-0239 3d			    DEC A  
-023a 32 0b fc		    LD (DAT_ram_fc0b),A  
-023d 3a 00 fc		    LD A,(ram_fc00_disk_for_next_access)  
-0240 21 0c fc		    LD HL,0xfc0c  
-0243 be			    CP (HL)  
-0244 c2 71 02		    JP NZ,LAB_ram_0271  
-0247 21 0d fc		    LD HL,0xfc0d  
-024a cd 11 03		    CALL FUN_ram_0311  
-024d c2 71 02		    JP NZ,LAB_ram_0271  
-0250 3a 03 fc		    LD A,(ram_fc03_sector_for_next_access)  
-0253 21 0f fc		    LD HL,0xfc0f  
-0256 be			    CP (HL)  
-0257 c2 71 02		    JP NZ,LAB_ram_0271  
-025a 34			    INC (HL)  
-025b 7e			    LD A,(HL)  
-025c fe 28		    CP 0x28  
-025e da 6a 02		    JP C,LAB_ram_026a  
-0261 36 00		    LD (HL),0x0  
-0263 2a 0d fc		    LD HL,(DAT_ram_fc0d)  
-0266 23			    INC HL  
-0267 22 0d fc		    LD (DAT_ram_fc0d),HL  
-026a			LAB_ram_026a:  
-026a af			    XOR A  
-026b 32 11 fc		    LD (DAT_ram_fc11),A  
-026e c3 79 02		    JP LAB_ram_0279  
-0271			LAB_ram_0271:  
-0271 af			    XOR A  
-0272 32 0b fc		    LD (DAT_ram_fc0b),A  
-0275 3c			    INC A  
-0276 32 11 fc		    LD (DAT_ram_fc11),A  
-0279			LAB_ram_0279:  
-0279 af			    XOR A  
-027a 32 10 fc		    LD (DAT_ram_fc10),A  
-027d 3a 03 fc		    LD A,(ram_fc03_sector_for_next_access)  
-0280 b7			    OR A  
-0281 1f			    RRA  
-0282 b7			    OR A  
-0283 1f			    RRA  
-0284 32 08 fc		    LD (DAT_ram_fc08),A  
-0287 21 09 fc		    LD HL,0xfc09  
-028a 7e			    LD A,(HL)  
-028b 36 01		    LD (HL),0x1  
-028d b7			    OR A  
-028e ca b5 02		    JP Z,LAB_ram_02b5  
-0291 3a 00 fc		    LD A,(ram_fc00_disk_for_next_access)  
-0294 21 04 fc		    LD HL,0xfc04  
-0297 be			    CP (HL)  
-0298 c2 ae 02		    JP NZ,LAB_ram_02ae  
-029b 21 05 fc		    LD HL,0xfc05  
-029e cd 11 03		    CALL FUN_ram_0311  
-02a1 c2 ae 02		    JP NZ,LAB_ram_02ae  
-02a4 3a 08 fc		    LD A,(DAT_ram_fc08)  
-02a7 21 07 fc		    LD HL,0xfc07  
-02aa be			    CP (HL)  
-02ab ca d2 02		    JP Z,LAB_ram_02d2  
-02ae			LAB_ram_02ae:  
-02ae 3a 0a fc		    LD A,(DAT_ram_fc0a)  
-02b1 b7			    OR A  
-02b2 c4 39 04		    CALL NZ,read_sector_yy  
-02b5			LAB_ram_02b5:  
-02b5 3a 00 fc		    LD A,(ram_fc00_disk_for_next_access)  
-02b8 32 04 fc		    LD (ram_fc04_disk_xx),A  
-02bb 2a 01 fc		    LD HL,(ram_fc01_track_for_next_access)  
-02be 22 05 fc		    LD (ram_fc05_track_xx),HL  
-02c1 3a 08 fc		    LD A,(DAT_ram_fc08)  
-02c4 32 07 fc		    LD (ram_fc07_sector_xx),A  
-02c7 3a 11 fc		    LD A,(DAT_ram_fc11)  
-02ca b7			    OR A  
-02cb c4 77 04		    CALL NZ,read_sector_xx  
-02ce af			    XOR A  
-02cf 32 0a fc		    LD (DAT_ram_fc0a),A  
-02d2			LAB_ram_02d2:  
-02d2 3a 03 fc		    LD A,(ram_fc03_sector_for_next_access)  
-02d5 e6 03		    AND 0x3  
-02d7 6f			    LD L,A  
-02d8 26 00		    LD H,0x0  
-02da 29			    ADD HL,HL  
-02db 29			    ADD HL,HL  
-02dc 29			    ADD HL,HL  
-02dd 29			    ADD HL,HL  
-02de 29			    ADD HL,HL  
-02df 29			    ADD HL,HL  
-02e0 29			    ADD HL,HL  
-02e1 11 16 fc		    LD DE,0xfc16  
-02e4 19			    ADD HL,DE  
-02e5 ed 5b 14 fc	    LD DE,(ram_fc14_DMA_address)  
-02e9 01 80 00		    LD BC,0x80  
-02ec 3a 12 fc		    LD A,(DAT_ram_fc12)  
-02ef b7			    OR A  
-02f0 20 06		    JR NZ,LAB_ram_02f8  
-02f2 3e 01		    LD A,0x1  
-02f4 32 0a fc		    LD (DAT_ram_fc0a),A  
-02f7 eb			    EX DE,HL  
-02f8			LAB_ram_02f8:  
-02f8 cd cd fe		    CALL move_RAM_relocated  
-02fb 3a 13 fc		    LD A,(DAT_ram_fc13)  
-02fe fe 01		    CP 0x1  
-0300 3a 10 fc		    LD A,(DAT_ram_fc10)  
-0303 c0			    RET NZ  
-0304 b7			    OR A  
-0305 c0			    RET NZ  
-0306 af			    XOR A  
-0307 32 0a fc		    LD (DAT_ram_fc0a),A  
-030a cd 39 04		    CALL read_sector_yy  
-030d 3a 10 fc		    LD A,(DAT_ram_fc10)  
-0310 c9			    RET  
-0311			FUN_ram_0311:  
-0311 eb			    EX DE,HL  
-0312 21 01 fc		    LD HL,0xfc01  
-0315 1a			    LD A,(DE)  
-0316 be			    CP (HL)  
-0317 c0			    RET NZ  
-0318 13			    INC DE  
-0319 23			    INC HL  
-031a 1a			    LD A,(DE)  
-031b be			    CP (HL)  
-031c c9			    RET  
-031d			fdc_set_disk:  
-031d 21 00 00		    LD HL,0x0  
-0320 79			    LD A,C  
-0321 fe 02		    CP 0x2  
-0323 d0			    RET NC  
-0324 b7			    OR A  
-0325 21 71 fe		    LD HL,0xfe71  
-0328 28 03		    JR Z,skip_for_disk_0  
-032a 21 82 fe		    LD HL,0xfe82  
-032d			skip_for_disk_0:  
-032d 3a 16 fe		    LD A,(mem_fe16_active_disk)  
-0330 b9			    CP C  
-0331 c8			    RET Z  
-0332 79			    LD A,C  
-0333 32 16 fe		    LD (mem_fe16_active_disk),A  
-0336 b7			    OR A  
-0337 e5			    PUSH HL  
-0338 11 10 00		    LD DE,0x10  
-033b 19			    ADD HL,DE  
-033c 7e			    LD A,(HL)  
-033d 32 17 fe		    LD (DAT_ram_fe17),A  
-0340 21 19 fe		    LD HL,0xfe19  
-0343 28 01		    JR Z,LAB_ram_0346  
-0345 2b			    DEC HL  
-0346			LAB_ram_0346:  
-0346 7e			    LD A,(HL)  
-0347 fe ff		    CP 0xff  
-0349 28 03		    JR Z,LAB_ram_034e  
-034b db 11		    IN A,(io_11_fdc_track)  
-034d 77			    LD (HL),A  
-034e			LAB_ram_034e:  
-034e 79			    LD A,C  
-034f b7			    OR A  
-0350 21 18 fe		    LD HL,0xfe18  
-0353 28 01		    JR Z,LAB_ram_0356  
-0355 23			    INC HL  
-0356			LAB_ram_0356:  
-0356 7e			    LD A,(HL)  
-0357 d3 11		    OUT (io_11_fdc_track),A  
-0359 eb			    EX DE,HL  
-035a e1			    POP HL  
-035b fe ff		    CP 0xff  
-035d c0			    RET NZ  
-035e cd ef 03		    CALL fdc_ensure_ready  
-0361 cd d8 01		    CALL fdc_restore_and_mem  
-0364 db 1c		    IN A,(io_1c_system_bits)  
-0366 e6 df		    AND 0xdf  
-0368 f6 00		    OR 0x0  
-036a d3 1c		    OUT (io_1c_system_bits),A  
-036c cd c1 03		    CALL fdc_read_address  
-036f 28 0e		    JR Z,local_read_address_ok  
-0371 db 1c		    IN A,(io_1c_system_bits)  
-0373 e6 df		    AND 0xdf  
-0375 f6 20		    OR 0x20  
-0377 d3 1c		    OUT (io_1c_system_bits),A  
-0379 cd c1 03		    CALL fdc_read_address  
-037c c0			    RET NZ  
-037d 18 1e		    JR local_read_address_second_ok  
-037f			local_read_address_ok:  
-037f e5			    PUSH HL  
-0380 d5			    PUSH DE  
-0381 11 00 00		    LD DE,0x0000  
-0384 73			    LD (HL),E  
-0385 23			    INC HL  
-0386 72			    LD (HL),D  
-0387 11 09 00		    LD DE,0x0009  
-038a 19			    ADD HL,DE  
-038b 11 a2 fe		    LD DE,0xfea2  
-038e 73			    LD (HL),E  
-038f 23			    INC HL  
-0390 72			    LD (HL),D  
-0391 11 05 00		    LD DE,0x0005  
-0394 19			    ADD HL,DE  
-0395 3e 00		    LD A,0x0  
-0397 77			    LD (HL),A  
-0398 32 17 fe		    LD (DAT_ram_fe17),A  
-039b 18 1c		    JR local_read_address_end  
-039d			local_read_address_second_ok:  
-039d e5			    PUSH HL  
-039e d5			    PUSH DE  
-039f 11 b1 fe		    LD DE,0xfeb1  
-03a2 73			    LD (HL),E  
-03a3 23			    INC HL  
-03a4 72			    LD (HL),D  
-03a5 11 09 00		    LD DE,0x0009  
-03a8 19			    ADD HL,DE  
-03a9 11 93 fe		    LD DE,0xfe93  
-03ac 73			    LD (HL),E  
-03ad 23			    INC HL  
-03ae 72			    LD (HL),D  
-03af 11 05 00		    LD DE,0x5  
-03b2 19			    ADD HL,DE  
-03b3 3e 20		    LD A,0x20  
-03b5 77			    LD (HL),A  
-03b6 32 17 fe		    LD (DAT_ram_fe17),A  
-03b9			local_read_address_end:  
-03b9 d1			    POP DE  
-03ba e1			    POP HL  
-03bb db 12		    IN A,(io_12_fdc_sector)  
-03bd d3 11		    OUT (io_11_fdc_track),A  
-03bf 12			    LD (DE),A  
-03c0 c9			    RET  
-03c1			fdc_read_address:  
-03c1 3e c4		    LD A,0xc4  
-03c3 d3 10		    OUT (io_10_fdc_command_status),A  
-03c5 cd 31 04		    CALL fdc_halt  
-03c8 cb 67		    BIT 0x4,A  
-03ca c9			    RET  
-03cb			fdc_restore:  
-03cb cd ef 03		    CALL fdc_ensure_ready  
-03ce 3e 00		    LD A,0x0  
-03d0 d3 10		    OUT (io_10_fdc_command_status),A  
-03d2 18 5d		    JR fdc_halt  
-03d4			fdc_seek_track_C:  
-03d4 cd ef 03		    CALL fdc_ensure_ready  
-03d7 79			    LD A,C  
-03d8 d3 13		    OUT (io_13_fdc_data),A  
-03da 3e 10		    LD A,0x10  
-03dc d3 10		    OUT (io_10_fdc_command_status),A  
-03de 18 51		    JR fdc_halt  
-03e0			fdc_set_sector_C:  
-03e0 79			    LD A,C  
-03e1 d3 12		    OUT (io_12_fdc_sector),A  
-03e3 c9			    RET  
-03e4			sector_translation:  
-03e4 7a			    LD A,D  
-03e5 b3			    OR E  
-03e6 60			    LD H,B  
-03e7 69			    LD L,C  
-03e8 c8			    RET Z  
-03e9 eb			    EX DE,HL  
-03ea 09			    ADD HL,BC  
-03eb 6e			    LD L,(HL)  
-03ec 26 00		    LD H,0x0  
-03ee c9			    RET  
-03ef			fdc_ensure_ready:  
-03ef e5			    PUSH HL  
-03f0 d5			    PUSH DE  
-03f1 c5			    PUSH BC  
-03f2 3e d0		    LD A,0xd0  
-03f4 d3 10		    OUT (io_10_fdc_command_status),A  
-03f6 cd 0f 04		    CALL turn_on_motor  
-03f9 3a 16 fe		    LD A,(mem_fe16_active_disk)  
-03fc 5f			    LD E,A  
-03fd db 1c		    IN A,(io_1c_system_bits)  
-03ff e6 fc		    AND 0xfc  
-0401 b3			    OR E  
-0402 3c			    INC A  
-0403 e6 df		    AND 0xdf  
-0405 21 17 fe		    LD HL,0xfe17  
-0408 b6			    OR (HL)  
-0409 d3 1c		    OUT (io_1c_system_bits),A  
-040b c1			    POP BC  
-040c d1			    POP DE  
-040d e1			    POP HL  
-040e c9			    RET  
-040f			turn_on_motor:  
-040f db 1c		    IN A,(io_1c_system_bits)  
-0411 cb 77		    BIT 0x6,A  
-0413 c8			    RET Z  
-0414 cb b7		    RES 0x6,A  
-0416 d3 1c		    OUT (io_1c_system_bits),A  
-0418 06 32		    LD B,0x32  
-041a cd 25 04		    CALL wait_B  
-041d c9			    RET  
-041e			turn_off_motor:  
-041e db 1c		    IN A,(io_1c_system_bits)  
-0420 cb f7		    SET 0x6,A  
-0422 d3 1c		    OUT (io_1c_system_bits),A  
-0424 c9			    RET  
-0425			wait_B:  
-0425 11 86 06		    LD DE,0x686  
-0428			wait_B_loop:  
-0428 1b			    DEC DE  
-0429 7a			    LD A,D  
-042a b3			    OR E  
-042b c2 28 04		    JP NZ,wait_B_loop  
-042e 10 f5		    DJNZ wait_B  
-0430 c9			    RET  
-0431			fdc_halt:  
-0431 76			    HALT  
-0432			wait_while_busy:  
-0432 db 10		    IN A,(io_10_fdc_command_status)  
-0434 cb 47		    BIT 0x0,A  
-0436 20 fa		    JR NZ,wait_while_busy  
-0438 c9			    RET  
-0439			read_sector_yy:  
-0439 2e 03		    LD L,0x3  
-043b			LAB_ram_043b:  
-043b 11 0f 04		    LD DE,0x40f  
-043e			LAB_ram_043e:  
-043e e5			    PUSH HL  
-043f d5			    PUSH DE  
-0440 cd 92 04		    CALL go_to_track_sector  
-0443 cd f4 fe		    CALL SUB_ram_fef4  
-0446 d1			    POP DE  
-0447 e1			    POP HL  
-0448 28 0d		    JR Z,LAB_ram_0457  
-044a 1d			    DEC E  
-044b 20 f1		    JR NZ,LAB_ram_043e  
-044d 15			    DEC D  
-044e 28 1c		    JR Z,LAB_ram_046c  
-0450 cd cb 03		    CALL fdc_restore  
-0453 1e 0f		    LD E,0xf  
-0455 18 e7		    JR LAB_ram_043e  
-0457			LAB_ram_0457:  
-0457 06 00		    LD B,0x0  
-0459 3e 88		    LD A,0x88  
-045b d3 10		    OUT (io_10_fdc_command_status),A  
-045d			LAB_ram_045d:  
-045d 76			    HALT  
-045e db 13		    IN A,(io_13_fdc_data)  
-0460 10 fb		    DJNZ LAB_ram_045d  
-0462			LAB_ram_0462:  
-0462 76			    HALT  
-0463 db 13		    IN A,(io_13_fdc_data)  
-0465 10 fb		    DJNZ LAB_ram_0462  
-0467 cd 31 04		    CALL fdc_halt  
-046a e6 9c		    AND 0x9c  
-046c			LAB_ram_046c:  
-046c 32 10 fc		    LD (DAT_ram_fc10),A  
-046f c8			    RET Z  
-0470 2d			    DEC L  
-0471 20 c8		    JR NZ,LAB_ram_043b  
-0473 3e ff		    LD A,0xff  
-0475 18 f5		    JR LAB_ram_046c  
-0477			read_sector_xx:  
-0477 11 0f 04		    LD DE,0x40f  
-047a			LAB_ram_047a:  
-047a d5			    PUSH DE  
-047b cd 92 04		    CALL go_to_track_sector  
-047e cd e3 fe		    CALL read_to_upper_relocated  
-0481 32 10 fc		    LD (DAT_ram_fc10),A  
-0484 d1			    POP DE  
-0485 c8			    RET Z  
-0486 1d			    DEC E  
-0487 20 f1		    JR NZ,LAB_ram_047a  
-0489 15			    DEC D  
-048a c8			    RET Z  
-048b cd cb 03		    CALL fdc_restore  
-048e 1e 0f		    LD E,0xf  
-0490 18 e8		    JR LAB_ram_047a  
-0492			go_to_track_sector:  
-0492 3a 04 fc		    LD A,(ram_fc04_disk_xx)  
-0495 4f			    LD C,A  
-0496 cd 1d 03		    CALL fdc_set_disk  
-0499 ed 4b 05 fc	    LD BC,(ram_fc05_track_xx)  
-049d cd d4 03		    CALL fdc_seek_track_C  
-04a0 3a 07 fc		    LD A,(ram_fc07_sector_xx)  
-04a3 4f			    LD C,A  
-04a4 cd e0 03		    CALL fdc_set_sector_C  
-04a7 c9			    RET  
-04a8			  
-04a8			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-04a8			; CODE RELOCATED TO UPPER RAM  
-04a8			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-04a8			  
-04a8			block_to_relocate_to_fecd:  
-04a8			reloc_move_RAM:  
-04a8			    ; Hide the ROM  
-04a8 db 1c		    IN A,(io_1c_system_bits)  
-04aa cb bf		    RES 0x7,A  
-04ac d3 1c		    OUT (io_1c_system_bits),A  
-04ae			    ; Copy the bytes  
-04ae ed b0		    LDIR  
-04b0			    ; Shot the ROM  
-04b0 db 1c		    IN A,(io_1c_system_bits)  
-04b2 cb ff		    SET 0x7,A  
-04b4 d3 1c		    OUT (io_1c_system_bits),A  
-04b6 c9			    RET  
-04b7			reloc_read_in_DMA:  
-04b7 2a 14 fc		    LD HL,(ram_fc14_DMA_address)  
-04ba 06 01		    LD B,0x1  
-04bc 18 05		    JR reloc_read_internal  
-04be			reloc_read_to_upper:  
-04be 21 16 fc		    LD HL,0xfc16  
-04c1 06 04		    LD B,0x4  
-04c3			reloc_read_internal:  
-04c3 11 88 9c		    LD DE,0x9c88  
-04c6 18 0f		    JR reloc_RW_internal  
-04c8			reloc_write_to_DMA:  
-04c8 2a 14 fc		    LD HL,(ram_fc14_DMA_address)  
-04cb 06 01		    LD B,0x1  
-04cd 18 05		    JR reloc_write_internal  
-04cf			reloc_write_from_upper:  
-04cf 21 16 fc		    LD HL,0xfc16  
-04d2 06 04		    LD B,0x4  
-04d4			reloc_write_internal:  
-04d4 11 ac fc		    LD DE,0xfcac  
-04d7			reloc_RW_internal:  
-04d7 cd ef 03		    CALL fdc_ensure_ready  
-04da f3			    DI  
-04db			    ; Hide the ROM  
-04db db 1c		    IN A,(io_1c_system_bits)  
-04dd cb bf		    RES 0x7,A  
-04df d3 1c		    OUT (io_1c_system_bits),A  
-04e1			    ; Setup RET as the handler of NMI  
-04e1			    ; as the ROM is paged out, there is no handler  
-04e1			    ; Store the previous value to restore it later  
-04e1 e5			    PUSH HL  
-04e2 21 66 00		    LD HL, nmi_isr  
-04e5 7e			    LD A,(HL)  
-04e6 08			    EX AF,AF'  
-04e7 36 c9		    LD (HL), RET_opcode  
-04e9 e1			    POP HL  
-04ea			  
-04ea 78			    LD A,B  
-04eb 01 13 80		    LD BC, sector_size * 0x100 + io_13_fdc_data  ; Setup of the INI command  
-04ee cb 47		    BIT 0x0,A  
-04f0 20 02		    JR NZ,LAB_ram_04f4  
-04f2 06 00		    LD B,0x0  
-04f4			LAB_ram_04f4:  
-04f4 fe 01		    CP 0x1  
-04f6 f5			    PUSH AF  
-04f7 7b			    LD A,E  
-04f8 fe ac		    CP 0xac  
-04fa 28 11		    JR Z,reloc_write_sector  
-04fc d3 10		    OUT (io_10_fdc_command_status),A  
-04fe f1			    POP AF  
-04ff 28 05		    JR Z,reloc_read_second_half_of_sector  
-0501			reloc_read_first_half_of_sector:  
-0501 76			    HALT  
-0502 ed a2		    INI                                          ; IN from io_13_fdc_data  
-0504 20 fb		    JR NZ,reloc_read_first_half_of_sector  
-0506			reloc_read_second_half_of_sector:  
-0506 76			    HALT  
-0507 ed a2		    INI                                          ; IN from io_13_fdc_data  
-0509 20 fb		    JR NZ,reloc_read_second_half_of_sector  
-050b 18 0f		    JR read_sector_completed  
-050d			reloc_write_sector:  
-050d d3 10		    OUT (io_10_fdc_command_status),A  
-050f f1			    POP AF  
-0510 28 05		    JR Z,reloc_write_second_half_of_sector  
-0512			reloc_write_first_half_of_sector:  
-0512 76			    HALT  
-0513 ed a3		    OUTI                                         ; OUT to io_13_fdc_data  
-0515 20 fb		    JR NZ,reloc_write_first_half_of_sector  
-0517			reloc_write_second_half_of_sector:  
-0517 76			    HALT  
-0518 ed a3		    OUTI                                         ; OUT to io_13_fdc_data  
-051a 20 fb		    JR NZ,reloc_write_second_half_of_sector  
-051c			read_sector_completed:  
-051c			    ; Restore the byte that was on the NMI handler  
-051c 08			    EX AF,AF'  
-051d 32 66 00		    LD (nmi_isr),A  
-0520			    ; Restore the ROM  
-0520 db 1c		    IN A,(io_1c_system_bits)  
-0522 cb ff		    SET 0x7,A  
-0524 d3 1c		    OUT (io_1c_system_bits),A  
-0526 fb			    EI  
-0527			    ; Wait for the disk access result code  
-0527 cd 31 04		    CALL fdc_halt  
-052a			    ; Return the result code: 0 or 1  
-052a a2			    AND D  
-052b c8			    RET Z  
-052c 3e 01		    LD A,0x1  
-052e c9			    RET  
-052f			  
-052f			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-052f			; IO PORTS INITIALIZATION  
-052f			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-052f			  
-052f			  
-052f			init_ports_count:  
-052f 1c			    DB 0x1C  
-0530			init_ports_data:  
-0530			    ; The first byte is the value to OUT on the port given by the second byte  
-0530 07 18		    DW 0x1807  
-0532 0c 05		    DW 0x050C  
-0534 07 04		    DW 0x0407  
-0536 07 44		    DW 0x4407  
-0538 07 03		    DW 0x0307  
-053a 07 c1		    DW 0xC107  
-053c 07 05		    DW 0x0507  
-053e 07 e8		    DW 0xE807  
-0540 07 01		    DW 0x0107  
-0542 07 00		    DW 0x0007  
-0544 06 18		    DW 0x1806  
-0546 00 05		    DW 0x0500  
-0548 06 04		    DW 0x0406  
-054a 06 44		    DW 0x4406  
-054c 06 03		    DW 0x0306  
-054e 06 e1		    DW 0xE106  
-0550 06 05		    DW 0x0506  
-0552 06 e8		    DW 0xE806  
-0554 06 01		    DW 0x0106  
-0556 06 00		    DW 0x0006  
-0558 1d 03		    DW 0x031D  
-055a 1c 81		    DW 0x811C  
-055c 1d cf		    DW 0xCF1D  
-055e 1d 0c		    DW 0x0C1D  
-0560 09 03		    DW 0x0309  
-0562 09 0f		    DW 0x0F09  
-0564 0b 03		    DW 0x030B  
-0566 0b 4f		    DW 0x4F0B  
-0568			init_ports:  
-0568 21 2f 05		    LD HL,init_ports_count  
-056b 46			    LD B,(HL)  
-056c			init_port_loop:  
-056c 23			    INC HL  
-056d 4e			    LD C,(HL)  
-056e 23			    INC HL  
-056f 7e			    LD A,(HL)  
-0570 ed 79		    OUT (C),A                                    ; An out for each pair of bytes in init_ports_data  
-0572 10 f8		    DJNZ init_port_loop  
-0574 c9			    RET  
-0575			  
-0575			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-0575			; KEYBOARD  
-0575			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-0575			  
-0575			is_key_pressed:  
-0575			    ; return 0 or FF in A  
-0575 db 07		    IN A,(io_07_keyboard_control)  
-0577 e6 01		    AND 0x1  
-0579 c8			    RET Z  
-057a 3e ff		    LD A,0xff  
-057c c9			    RET  
-057d			  
-057d			get_key:  
-057d			    ; return char in A  
-057d cd 75 05		    CALL is_key_pressed  
-0580 28 fb		    JR Z,get_key  
-0582 db 05		    IN A,(io_05_keyboard_data)  
-0584 cd 92 05		    CALL translate_keyboard_in_a  
-0587 c9			    RET  
-0588			  
-0588			keyboard_out:  
-0588			    ; char in C. C=4 for the bell.  
-0588 db 07		    IN A,(io_07_keyboard_control)  
-058a e6 04		    AND 0x4  
-058c 28 fa		    JR Z,keyboard_out                            ; Loop until the keyboard is ready  
-058e 79			    LD A,C  
-058f d3 05		    OUT (io_05_keyboard_data),A  
-0591 c9			    RET  
-0592			  
-0592			translate_keyboard_in_a:  
-0592 21 a7 05		    LD HL,translate_keyboard_keys  
-0595 01 13 00		    LD BC,translate_keyboard_size  
-0598 ed b1		    CPIR  
-059a c0			    RET NZ                                       ; Return the key not trasnlated  
-059b			    ; key found, replace with the corresponding char  
-059b 11 a7 05		    LD DE,translate_keyboard_keys  
-059e b7			    OR A  
-059f ed 52		    SBC HL,DE  
-05a1 11 b9 05		    LD DE,translate_keyboard_values  
-05a4 19			    ADD HL,DE  
-05a5 7e			    LD A,(HL)  
-05a6 c9			    RET  
-05a7			translate_keyboard_size: EQU 0x13  
-05a7			translate_keyboard_keys:  
-05a7 f1 f2 f3 f4 b1 c0 c1 c2	    DB 0xF1, 0xF2, 0xF3, 0xF4, 0xB1, 0xC0, 0xC1, 0xC2  
-05af d0 d1 d2 e1 e2 e3 e4 d3	    DB 0xD0, 0xD1, 0xD2, 0xE1, 0xE2, 0xE3, 0xE4, 0xD3  
-05b7 c3 b2		    DB 0xC3, 0xB2                                ; The 0xff from the values table is used as the last key  
-05b9			translate_keyboard_values:  
-05b9 ff 80 81 82 83 84 85 86	    DB 0xFF, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86  
-05c1 87 88 89 8a 8b 8c 8d 8e	    DB 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E  
-05c9 8f 90 91		    DB 0x8F, 0x90, 0x91  
-05cc			  
-05cc			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-05cc			; SERIAL AND PARALLEL  
-05cc			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-05cc			  
-05cc			is_serial_byte_ready:  
-05cc db 06		    IN A,(io_06_serial_control)  
-05ce e6 01		    AND 0x1  
-05d0 18 1c		    JR force_0_or_ff  
-05d2			get_byte_from_serial:  
-05d2 cd cc 05		    CALL is_serial_byte_ready  
-05d5 28 fb		    JR Z,get_byte_from_serial  
-05d7 db 04		    IN A,(io_04_serial_data)  
-05d9 c9			    RET  
-05da			serial_out:  
-05da db 06		    IN A,(io_06_serial_control)  
-05dc e6 04		    AND 0x4  
-05de 28 fa		    JR Z,serial_out  
-05e0 79			    LD A,C  
-05e1 d3 04		    OUT (io_04_serial_data),A  
-05e3 c9			    RET  
-05e4			serial_get_control:  
-05e4 db 06		    IN A,(io_06_serial_control)  
-05e6 e6 04		    AND 0x4  
-05e8 18 04		    JR force_0_or_ff  
-05ea			lpt_status:  
-05ea db 1c		    IN A,(io_1c_system_bits)  
-05ec cb 5f		    BIT 0x3,A  
-05ee			force_0_or_ff:  
-05ee c8			    RET Z  
-05ef 3e ff		    LD A,0xff  
-05f1 c9			    RET  
-05f2			lpt_output:  
-05f2 cd ea 05		    CALL lpt_status  
-05f5 28 fb		    JR Z,lpt_output  
-05f7 79			    LD A,C  
-05f8 d3 08		    OUT (DAT_io_0008),A  
-05fa db 1c		    IN A,(io_1c_system_bits)  
-05fc cb e7		    SET 0x4,A  
-05fe d3 1c		    OUT (io_1c_system_bits),A  
-0600 cb a7		    RES 0x4,A  
-0602 d3 1c		    OUT (io_1c_system_bits),A  
-0604 c9			    RET  
-0605			  
-0605			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-0605			; CONSOLE OUTPUT  
-0605			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
-0605			  
-0605			init_screen:  
-0605 3e 20		    LD A,0x20  
-0607 32 6d fe		    LD (DAT_ram_fe6d),A  
-060a cd c4 06		    CALL console_clear_screen  
-060d 22 6e fe		    LD (RAM_fe6e_cursor),HL  
-0610 af			    XOR A  
-0611 32 6c fe		    LD (DAT_ram_fe6c),A  
-0614 3e 17		    LD A,0x17  
-0616 d3 14		    OUT (io_14_scroll_register),A  
-0618 3e 7f		    LD A,0x7f  
-061a 32 70 fe		    LD (DAT_ram_fe70),A  
-061d c9			    RET  
-061e			  
-061e			console_write_c:  
-061e 3a 6c fe		    LD A,(DAT_ram_fe6c)  
-0621 b7			    OR A  
-0622 c2 3b 07		    JP NZ,LAB_ram_073b  
-0625 3e 07		    LD A,0x7                                                                   ; ^G, BEL  
-0627 b9			    CP C  
-0628 20 05		    JR NZ,console_write_c_cont  
-062a 0e 04		    LD C,0x4  
-062c c3 88 05		    JP keyboard_out  
-062f			console_write_c_cont:  
-062f cd 22 07		    CALL set_hl_to_cursor_a_to_char_cleaned  
-0632 11 95 07		    LD DE,0x795  
-0635 d5			    PUSH DE  
-0636 79			    LD A,C  
-0637 fe 0a		    CP 0xa  
-0639 28 64		    JR Z,console_line_feed  
-063b fe 0d		    CP 0xd  
-063d ca 30 07		    JP Z,console_carriage_return  
-0640 fe 08		    CP 0x8  
-0642 28 61		    JR Z,console_backspace  
-0644 fe 0c		    CP 0xc  
-0646 28 63		    JR Z,console_right  
-0648 fe 0b		    CP 0xb  
-064a 28 67		    JR Z,console_up  
-064c fe 1b		    CP 0x1b  
-064e ca 35 07		    JP Z,store_1_in_fe6c  
-0651 fe 18		    CP 0x18  
-0653 ca fd 06		    JP Z,console_erase_to_end_of_line  
-0656 fe 17		    CP 0x17  
-0658 28 7f		    JR Z,console_erase_to_end_of_screen  
-065a fe 1a		    CP 0x1a  
-065c 28 66		    JR Z,console_clear_screen  
-065e fe 1e		    CP 0x1e  
-0660 28 73		    JR Z,console_home_cursor  
-0662 fe 60		    CP 0x60  
-0664 38 04		    JR C,LAB_ram_066a  
-0666 3a 70 fe		    LD A,(DAT_ram_fe70)  
-0669 a1			    AND C  
-066a			LAB_ram_066a:  
-066a 77			    LD (HL),A  
-066b 23			    INC HL  
-066c 7d			    LD A,L  
-066d e6 7f		    AND 0x7f  
-066f fe 50		    CP 0x50  
-0671 d8			    RET C  
-0672 cd 30 07		    CALL console_carriage_return  
-0675 18 28		    JR console_line_feed  
-0677			LAB_ram_0677:  
-0677 11 ff 3b		    LD DE,0x3bff  
-067a 7a			    LD A,D  
-067b bc			    CP H  
-067c 38 04		    JR C,LAB_ram_0682  
-067e c0			    RET NZ  
-067f 7b			    LD A,E  
-0680 bd			    CP L  
-0681 d0			    RET NC  
-0682			LAB_ram_0682:  
-0682 06 17		    LD B,0x17  
-0684 21 80 30		    LD HL,0x3080  
-0687 11 00 30		    LD DE,address_vram  
-068a			LAB_ram_068a:  
-068a c5			    PUSH BC  
-068b 01 50 00		    LD BC,0x50  
-068e ed b0		    LDIR  
-0690 01 30 00		    LD BC,0x30  
-0693 09			    ADD HL,BC  
-0694 eb			    EX DE,HL  
-0695 09			    ADD HL,BC  
-0696 eb			    EX DE,HL  
-0697 c1			    POP BC  
-0698 10 f0		    DJNZ LAB_ram_068a  
-069a 21 80 3b		    LD HL,0x3b80  
-069d 18 5e		    JR console_erase_to_end_of_line  
-069f			  
-069f			console_line_feed:  
-069f 11 80 00		    LD DE,0x80  
-06a2 19			    ADD HL,DE  
-06a3 18 d2		    JR LAB_ram_0677  
-06a5			  
-06a5			console_backspace:  
-06a5 7d			    LD A,L  
-06a6 e6 7f		    AND 0x7f  
-06a8 c8			    RET Z  
-06a9 2b			    DEC HL  
-06aa c9			    RET  
-06ab			  
-06ab			console_right:  
-06ab 7d			    LD A,L  
-06ac e6 7f		    AND 0x7f  
-06ae fe 4f		    CP 0x4f  
-06b0 d0			    RET NC  
-06b1 23			    INC HL  
-06b2 c9			    RET  
-06b3			  
-06b3			console_up:  
-06b3 e5			    PUSH HL  
-06b4 11 80 ff		    LD DE,0xff80  
-06b7 19			    ADD HL,DE  
-06b8 e5			    PUSH HL  
-06b9 b7			    OR A  
-06ba 11 00 30		    LD DE,address_vram  
-06bd ed 52		    SBC HL,DE  
-06bf e1			    POP HL  
-06c0 d1			    POP DE  
-06c1 d0			    RET NC  
-06c2 eb			    EX DE,HL  
-06c3 c9			    RET  
-06c4			  
-06c4			console_clear_screen:  
-06c4 21 00 30		    LD HL,address_vram  
-06c7 11 01 30		    LD DE,address_vram+1  
-06ca 01 ff 0b		    LD BC,0xbff  
-06cd 36 20		    LD (HL),0x20  
-06cf ed b0		    LDIR  
-06d1 21 00 30		    LD HL,address_vram  
-06d4 c9			    RET  
-06d5			  
-06d5			console_home_cursor:  
-06d5 21 00 30		    LD HL,address_vram  
-06d8 c9			    RET  
-06d9			  
-06d9			console_erase_to_end_of_screen:  
-06d9 e5			    PUSH HL  
-06da cd fd 06		    CALL console_erase_to_end_of_line  
-06dd 11 80 00		    LD DE,0x80  
-06e0 7d			    LD A,L  
-06e1 e6 80		    AND 0x80  
-06e3 6f			    LD L,A  
-06e4 19			    ADD HL,DE  
-06e5 3e 3c		    LD A,0x3c  
-06e7 bc			    CP H  
-06e8 28 11		    JR Z,LAB_ram_06fb  
-06ea 5d			    LD E,L  
-06eb 54			    LD D,H  
-06ec b7			    OR A  
-06ed 21 ff 3b		    LD HL,0x3bff  
-06f0 ed 52		    SBC HL,DE  
-06f2 4d			    LD C,L  
-06f3 44			    LD B,H  
-06f4 62			    LD H,D  
-06f5 6b			    LD L,E  
-06f6 13			    INC DE  
-06f7 36 20		    LD (HL),0x20  
-06f9 ed b0		    LDIR  
-06fb			LAB_ram_06fb:  
-06fb e1			    POP HL  
-06fc c9			    RET  
-06fd			  
-06fd			console_erase_to_end_of_line:  
-06fd 7d			    LD A,L  
-06fe e6 7f		    AND 0x7f  
-0700 fe 4f		    CP 0x4f  
-0702 38 03		    JR C,console_erase_to_end_of_line_cont  
-0704 36 20		    LD (HL),0x20  
-0706 c9			    RET  
-0707			console_erase_to_end_of_line_cont:  
-0707 e5			    PUSH HL  
-0708 e5			    PUSH HL  
-0709 7d			    LD A,L  
-070a e6 80		    AND 0x80  
-070c 6f			    LD L,A  
-070d 11 4f 00		    LD DE,0x004f  
-0710 19			    ADD HL,DE  
-0711 d1			    POP DE  
-0712 d5			    PUSH DE  
-0713 b7			    OR A  
-0714 ed 52		    SBC HL,DE  
-0716 4d			    LD C,L  
-0717 44			    LD B,H  
-0718 e1			    POP HL  
-0719 5d			    LD E,L  
-071a 54			    LD D,H  
-071b 13			    INC DE  
-071c 36 20		    LD (HL),0x20  
-071e ed b0		    LDIR  
-0720 e1			    POP HL  
-0721 c9			    RET  
-0722			  
-0722			set_hl_to_cursor_a_to_char_cleaned:  
-0722 2a 6e fe		    LD HL,(RAM_fe6e_cursor)  
-0725 7e			    LD A,(HL)  
-0726 fe df		    CP 0xdf  
-0728 3e 20		    LD A,0x20  
-072a 20 01		    JR NZ,LAB_ram_072d  
-072c 77			    LD (HL),A  
-072d			LAB_ram_072d:  
-072d cb be		    RES 0x7,(HL)  
-072f c9			    RET  
-0730			  
-0730			console_carriage_return:  
-0730 7d			    LD A,L  
-0731 e6 80		    AND 0x80  
-0733 6f			    LD L,A  
-0734 c9			    RET  
-0735			  
-0735			store_1_in_fe6c:  
-0735 3e 01		    LD A,0x1  
-0737 32 6c fe		    LD (DAT_ram_fe6c),A  
-073a c9			    RET  
-073b			  
-073b			LAB_ram_073b:  
-073b 21 a2 07		    LD HL,0x7a2  
-073e e5			    PUSH HL  
-073f 21 6c fe		    LD HL,0xfe6c  
-0742 36 00		    LD (HL),0x0  
-0744 fe 01		    CP 0x1  
-0746 20 19		    JR NZ,LAB_ram_0761  
-0748 79			    LD A,C  
-0749 cb bf		    RES 0x7,A  
-074b fe 47		    CP 0x47  
-074d 28 54		    JR Z,store_1f_in_fe70  
-074f fe 41		    CP 0x41  
-0751 28 56		    JR Z,store_7f_in_fe70  
-0753 fe 52		    CP 0x52  
-0755 28 58		    JR Z,LAB_ram_07af  
-0757 fe 45		    CP 0x45  
-0759 28 66		    JR Z,LAB_ram_07c1  
-075b fe 3d		    CP 0x3d  
-075d c0			    RET NZ  
-075e 36 02		    LD (HL),0x2  
-0760 c9			    RET  
-0761			  
-0761			LAB_ram_0761:  
-0761 fe 02		    CP 0x2  
-0763 20 07		    JR NZ,LAB_ram_076c  
-0765 79			    LD A,C  
-0766 32 6d fe		    LD (DAT_ram_fe6d),A  
-0769 36 03		    LD (HL),0x3  
-076b c9			    RET  
-076c			LAB_ram_076c:  
-076c fe 03		    CP 0x3  
-076e c0			    RET NZ  
-076f cd 22 07		    CALL set_hl_to_cursor_a_to_char_cleaned  
-0772 e1			    POP HL  
-0773 21 00 30		    LD HL,address_vram  
-0776 79			    LD A,C  
-0777 d6 20		    SUB 0x20  
-0779			  
-0779			LAB_ram_0779:  
-0779 d6 50		    SUB 0x50  
-077b 30 fc		    JR NC,LAB_ram_0779  
-077d c6 50		    ADD A,0x50  
-077f 6f			    LD L,A  
-0780 3a 6d fe		    LD A,(DAT_ram_fe6d)  
-0783 d6 20		    SUB 0x20  
-0785			  
-0785			LAB_ram_0785:  
-0785 d6 18		    SUB 0x18  
-0787 30 fc		    JR NC,LAB_ram_0785  
-0789 c6 18		    ADD A,0x18  
-078b 11 80 00		    LD DE,0x80  
-078e			  
-078e			LAB_ram_078e:  
-078e ca 95 07		    JP Z,LAB_ram_0795  
-0791 19			    ADD HL,DE  
-0792 3d			    DEC A  
-0793 18 f9		    JR LAB_ram_078e  
-0795			  
-0795			LAB_ram_0795:  
-0795 7e			    LD A,(HL)  
-0796 fe 20		    CP 0x20  
-0798 20 02		    JR NZ,LAB_ram_079c  
-079a 3e df		    LD A,0xdf  
-079c			LAB_ram_079c:  
-079c cb ff		    SET 0x7,A  
-079e 77			    LD (HL),A  
-079f 22 6e fe		    LD (RAM_fe6e_cursor),HL  
-07a2 c9			    RET  
-07a3			  
-07a3			store_1f_in_fe70:  
-07a3 3e 1f		    LD A,0x1f  
-07a5 32 70 fe		    LD (DAT_ram_fe70),A  
-07a8 c9			    RET  
-07a9			  
-07a9			store_7f_in_fe70:  
-07a9 3e 7f		    LD A,0x7f  
-07ab 32 70 fe		    LD (DAT_ram_fe70),A  
-07ae c9			    RET  
-07af			  
-07af			LAB_ram_07af:  
-07af e1			    POP HL  
-07b0 cd d8 07		    CALL FUN_ram_07d8  
-07b3 d5			    PUSH DE  
-07b4 28 02		    JR Z,LAB_ram_07b8  
-07b6 ed b0		    LDIR  
-07b8			LAB_ram_07b8:  
-07b8 21 80 3b		    LD HL,0x3b80  
-07bb cd fd 06		    CALL console_erase_to_end_of_line  
-07be e1			    POP HL  
-07bf 18 d4		    JR LAB_ram_0795  
-07c1			  
-07c1			LAB_ram_07c1:  
-07c1 e1			    POP HL  
-07c2 cd d8 07		    CALL FUN_ram_07d8  
-07c5 d5			    PUSH DE  
-07c6 28 08		    JR Z,LAB_ram_07d0  
-07c8 11 ff 3b		    LD DE,0x3bff  
-07cb 21 7f 3b		    LD HL,0x3b7f  
-07ce ed b8		    LDDR  
-07d0			LAB_ram_07d0:  
-07d0 e1			    POP HL  
-07d1 e5			    PUSH HL  
-07d2 cd fd 06		    CALL console_erase_to_end_of_line  
-07d5 e1			    POP HL  
-07d6 18 bd		    JR LAB_ram_0795  
-07d8			  
-07d8			FUN_ram_07d8:  
-07d8 cd 22 07		    CALL set_hl_to_cursor_a_to_char_cleaned  
-07db cd 30 07		    CALL console_carriage_return  
-07de e5			    PUSH HL  
-07df eb			    EX DE,HL  
-07e0 21 80 3b		    LD HL,0x3b80  
-07e3 b7			    OR A  
-07e4 ed 52		    SBC HL,DE  
-07e6 44			    LD B,H  
-07e7 4d			    LD C,L  
-07e8 e1			    POP HL  
-07e9 e5			    PUSH HL  
-07ea 11 80 00		    LD DE,0x80  
-07ed 19			    ADD HL,DE  
-07ee d1			    POP DE  
-07ef 78			    LD A,B  
-07f0 b1			    OR C  
-07f1 c9			    RET  
-07f2			  
-07f2			console_write_string:  
-07f2 e3			    EX (SP),HL  
-07f3 7e			    LD A,(HL)  
-07f4 23			    INC HL  
-07f5 e3			    EX (SP),HL  
-07f6 b7			    OR A  
-07f7 c8			    RET Z  
-07f8 4f			    LD C,A  
-07f9 cd 1e 06		    CALL console_write_c  
-07fc 18 f4		    JR console_write_string  
-07fe			  
-07fe			filler:  
-07fe ff 00		    DB 0xff, 0x00  
-0800			  
-0800			  
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; Analysis of the Kaypro II ROM 
+0000			; 
+0000			; Based on 81-149c.rom 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			 
+0000			 
+0000			 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; CONSTANTS 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			 
+0000			io_04_serial_data:        EQU 0x04 
+0000			io_05_keyboard_data:      EQU 0x05 
+0000			io_06_serial_control:     EQU 0x06 
+0000			io_07_keyboard_control:   EQU 0x07 
+0000			io_08_parallel_data:      EQU 0x08 
+0000			io_10_fdc_command_status: EQU 0x10 
+0000			io_11_fdc_track:          EQU 0x11 
+0000			io_12_fdc_sector:         EQU 0x12 
+0000			io_13_fdc_data:           EQU 0x13 
+0000			io_14_scroll_register:    EQU 0x14 
+0000			io_1c_system_bits:        EQU 0x1c 
+0000			 
+0000			system_bit_drive_a:          EQU 0 
+0000			system_bit_drive_b:          EQU 1 
+0000			system_bit_unused:           EQU 2  
+0000			system_bit_centronicsReady:  EQU 3  
+0000			system_bit_centronicsStrobe: EQU 4 
+0000			system_bit_double_density:   EQU 5 
+0000			system_bit_motors:           EQU 6 
+0000			system_bit_bank:             EQU 7 
+0000			 
+0000			system_bit_drive_a_mask:          EQU 0x01 
+0000			system_bit_drive_b_mask:          EQU 0x02 
+0000			system_bit_unused_mask:           EQU 0x04 
+0000			system_bit_centronicsReady_mask:  EQU 0x08 
+0000			system_bit_centronicsStrobe_mask: EQU 0x10 
+0000			system_bit_double_density_mask:   EQU 0x20 
+0000			system_bit_motors_mask:           EQU 0x40 
+0000			system_bit_bank_mask:             EQU 0x80 
+0000			 
+0000			 
+0000			address_vram:      EQU 0x3000 
+0000			sectors_per_track: EQU 40                        ; pysical sectors. CP/M sees only 10 bigger sectors 
+0000			sector_size:	   EQU 128                       ; physical sector size. Logical will be 512 for CP/M 
+0000			 
+0000			RET_opcode:	       EQU 0xC9                      ; RET, used to set the NMI_ISR when the ROM is disabled 
+0000			 
+0000			; The first boot sector has the info about 
+0000			; the rest of the boot sector loadind 
+0000			first_sector_load_address:     EQU 0xfa00 
+0000			address_to_load_second_sector: EQU 0xfa02 
+0000			address_to_exec_boot:          EQU 0xfa04 
+0000			count_of_boot_sectors_needed:  EQU 0xfa06 
+0000			 
+0000			ram_fc00_disk_for_next_access:   EQU 0xfc00 
+0000			ram_fc01_track_for_next_access:  EQU 0xfc01 
+0000			ram_fc03_sector_for_next_access: EQU 0xfc03 
+0000			 
+0000			ram_fc04_disk_xx:   EQU 0xfc04 
+0000			ram_fc05_track_xx:  EQU 0xfc05 
+0000			ram_fc07_sector_xx: EQU 0xfc07 
+0000			 
+0000			DAT_ram_fc08: EQU 0xfc08 
+0000			DAT_ram_fc09: EQU 0xfc09 
+0000			DAT_ram_fc0a: EQU 0xfc0a 
+0000			DAT_ram_fc0b: EQU 0xfc0b 
+0000			DAT_ram_fc0c: EQU 0xfc0c 
+0000			DAT_ram_fc0d: EQU 0xfc0d 
+0000			DAT_ram_fc0f: EQU 0xfc0f 
+0000			DAT_ram_fc10: EQU 0xfc10 
+0000			DAT_ram_fc11: EQU 0xfc11 
+0000			DAT_ram_fc12: EQU 0xfc12 
+0000			DAT_ram_fc13: EQU 0xfc13 
+0000			ram_fc14_DMA_address: EQU 0xfc14 
+0000			DAT_ram_fc16: EQU 0xfc16 
+0000			DAT_ram_fc17: EQU 0xfc17 
+0000			DAT_ram_fc18: EQU 0xfc18 
+0000			DAT_ram_fc19: EQU 0xfc19 
+0000			 
+0000			mem_fe16_active_disk:  EQU 0xfe16 
+0000			DAT_ram_fe17:          EQU 0xfe17                ; Disk related flags? 
+0000			mem_fe18_active_track: EQU 0xfe18 
+0000			mem_fe19_track:        EQU 0xfe19 
+0000			 
+0000			DAT_ram_fe6c:    EQU 0xfe6c 
+0000			DAT_ram_fe6d:    EQU 0xfe6d 
+0000			RAM_fe6e_cursor: EQU 0xfe6e 
+0000			SUB_ram_fef4:    EQU 0xfef4 
+0000			DAT_ram_fe70:    EQU 0xfe70 
+0000			LAB_ram_feed:    EQU 0xfeed 
+0000			 
+0000			; Some code is relocated to upper memory 
+0000			disk_params_destination: EQU 0xfe71 
+0000			relocation_destination:  EQU 0xfecd 
+0000			relocation_offset:       EQU 0xfecd - 0x04a8 ; relocation_destination - block_to_relocate_to_fecd 
+0000			read_in_DMA_relocated:   EQU 0xfedc          ; reloc_read_in_DMA + relocation_offset 
+0000			move_RAM_relocated:      EQU 0xfecd          ; reloc_move_RAM + relocation_offset 
+0000			read_to_upper_relocated: EQU 0xfee3          ; reloc_read_to_upper + relocation_offset 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; BIOS ENTRY POINTS 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			 
+0000			ORG	0h 
+0000 c3 4b 00		    JP cold_boot 
+0003 c3 86 01		    JP init_upper_RAM 
+0006 c3 05 06		    JP init_screen 
+0009 c3 68 05		    JP init_ports 
+000c c3 d8 01		    JP fdc_restore_and_mem 
+000f c3 b4 01		    JP set_disk_for_next_access 
+0012 c3 cc 01		    JP set_track_for_next_access 
+0015 c3 bb 01		    JP set_sector_for_next_access 
+0018 c3 c7 01		    JP set_DMA_address_for_next_access 
+001b c3 ec 01		    JP read_sector 
+001e c3 07 02		    JP write_sector 
+0021 c3 e4 03		    JP sector_translation 
+0024 c3 0f 04		    JP turn_on_motor 
+0027 c3 1e 04		    JP turn_off_motor 
+002a c3 75 05		    JP is_key_pressed                            ; return 0 or FF in A 
+002d c3 7d 05		    JP get_key                                   ; return char in A 
+0030 c3 88 05		    JP keyboard_out                              ; char in C, used for the bell 
+0033 c3 cc 05		    JP is_serial_byte_ready 
+0036 c3 d2 05		    JP get_byte_from_serial 
+0039 c3 da 05		    JP serial_out 
+003c c3 ea 05		    JP lpt_status 
+003f c3 f2 05		    JP lpt_output 
+0042 c3 e4 05		    JP serial_get_control 
+0045 c3 1e 06		    JP console_write_c 
+0048 c3 25 04		    JP wait_B                                    ; wait time in B 
+004b			 
+004b			 
+004b			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+004b			; INITIALIZATION AND BOOT FROM DISK 
+004b			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+004b			 
+004b			cold_boot: 
+004b f3			    DI 
+004c 31 ff ff		    LD SP, 0xffff 
+004f 06 0a		    LD B, 0xa 
+0051 cd 25 04		    CALL wait_B 
+0054 cd 68 05		    CALL init_ports 
+0057 cd 05 06		    CALL init_screen 
+005a cd 86 01		    CALL init_upper_RAM 
+005d 18 08		    JR cold_boot_continue                        ; Avoid the NMI entry point at 0x0066 
+005f 3d 00 00 00 00 00 00	    DB 0x3D, 0, 0, 0, 0, 0, 0 
+0066			nmi_isr: 
+0066 c9			    RET                                          ; Just return from the interrupts generated 
+0067			                                                 ; by the floppy controller 
+0067			 
+0067			cold_boot_continue: 
+0067 cd f2 07		    CALL console_write_string                    ; console_write_string gets the zero terminated 
+006a			                                                 ; string after the CALL 
+006a 1b .. 2a 3f	    DB 1Bh,"=", 0x20 + 0xa, 0x20 + 0x1f          ; ESC code, move to line 10, column 31 
+006e ..			    DB "*    KAYPRO II    *" 
+0081 1b .. 2d 34	    DB 1Bh,"=", 0x20 + 0xd, 0x20 + 0x14          ; ESC code, move to line 13, column 20 
+0085 ..			    DB " Please place your diskette into Drive A" 
+00ad 08			    DB 0x8                                       ; Cursor 
+00ae 00			    DB 0  									     ; End string 
+00af			 
+00af 0e 00		    LD C,0x0 
+00b1 cd b4 01		    CALL set_disk_for_next_access 
+00b4 01 00 00		    LD BC,0x0 
+00b7 cd cc 01		    CALL set_track_for_next_access 
+00ba 0e 00		    LD C,0x0 
+00bc cd bb 01		    CALL set_sector_for_next_access 
+00bf 01 00 fa		    LD BC, first_sector_load_address 
+00c2 cd c7 01		    CALL set_DMA_address_for_next_access 
+00c5 cd ec 01		    CALL read_sector                             ; Read the first sector 
+00c8 f3			    DI 
+00c9 b7			    OR A 
+00ca 20 3e		    JR NZ,error_bad_disk 
+00cc ed 4b 02 fa	    LD BC,(address_to_load_second_sector)        ; Use the info from the first sector to continue 
+00d0 ed 43 14 fc	    LD (ram_fc14_DMA_address),BC 
+00d4 ed 4b 04 fa	    LD BC,(address_to_exec_boot)                 ; Store the boot exec addres on the stack. A RET will jump there 
+00d8 c5			    PUSH BC 
+00d9 ed 4b 06 fa	    LD BC,(count_of_boot_sectors_needed) 
+00dd 41			    LD B,C 
+00de 0e 01		    LD C,0x1                                     ; Continue reading from sector 1 
+00e0			read_another_boot_sector: 
+00e0 c5			    PUSH BC                                      ; B has the count of sectors remaining 
+00e1			                                                 ; C has the current sector number 
+00e1 cd bb 01		    CALL set_sector_for_next_access 
+00e4 cd ec 01		    CALL read_sector 
+00e7 f3			    DI 
+00e8 c1			    POP BC 
+00e9 b7			    OR A 
+00ea 20 1e		    JR NZ,error_bad_disk 
+00ec 2a 14 fc		    LD HL,(ram_fc14_DMA_address) 
+00ef 11 80 00		    LD DE, sector_size 
+00f2 19			    ADD HL,DE                                    ; Increase by 128 the load address (sector size is 128 bytes)?? 
+00f3 22 14 fc		    LD (ram_fc14_DMA_address),HL 
+00f6 05			    DEC B 
+00f7 c8			    RET Z                                        ; Done. Jump to the boot exec address previously pushed 
+00f8 0c			    INC C 
+00f9 3e 28		    LD A, sectors_per_track 
+00fb b9			    CP C                                         ; Check if we have to go to the next track 
+00fc 20 e2		    JR NZ,read_another_boot_sector 
+00fe 0e 10		    LD C,0x10                                    ; Track 0 completed. Continue with sector 1, track 10 
+0100 c5			    PUSH BC 
+0101 01 01 00		    LD BC,0x0001                                 ; Sector 1 
+0104 cd cc 01		    CALL set_track_for_next_access 
+0107 c1			    POP BC 
+0108 18 d6		    JR read_another_boot_sector 
+010a			error_bad_disk: 
+010a cd f2 07		    CALL console_write_string 
+010d .. 00		    DB "\n\r\n\r\aI cannot read your diskette.",0 
+012f cd 1e 04		    CALL turn_off_motor 
+0132			wait_forever: 
+0132 18 fe		    JR wait_forever                              ; Lock the CPU	 
+0134			 
+0134			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0134			; COPY CODE AND DATA TO UPPER RAM 
+0134			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0134			 
+0134			disk_params:                                     ; This data will be copied to 0xfe71  
+0134			init_data_drive_0: 
+0134 00 00 00 00 00 00 00 00	    DB 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 
+013c 73 ff a2 fe 1a fe 2a fe	    DB 0x73, 0xFF, 0xA2, 0xFE, 0x1A, 0xFE, 0x2A, 0xFE 
+0144 00			    DB 0x00 
+0145			init_data_drive_1: 
+0145 00 00 00 00 00 00 00 00	    DB 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 
+014d 73 ff a2 fe 43 fe 53 fe	    DB 0x73, 0xFF, 0xA2, 0xFE, 0x43, 0xFE, 0x53, 0xFE 
+0155 00			    DB 0x00 
+0156			init_data_rest:                                  ; Purpose? 
+0156 12 00 03 07 00 52 00 1f	    DB 0x12, 0x00, 0x03, 0x07, 0x00, 0x52, 0x00, 0x1F 
+015e 00 80 00 08 00 03 00 28	    DB 0x00, 0x80, 0x00, 0x08, 0x00, 0x03, 0x00, 0x28 
+0166 00 03 07 00 c2 00 3f 00	    DB 0x00, 0x03, 0x07, 0x00, 0xC2, 0x00, 0x3F, 0x00 
+016e f0 00 10 00 01 00 01 06	    DB 0xF0, 0x00, 0x10, 0x00, 0x01, 0x00, 0x01, 0x06 
+0176 0b 10 03 08 0d 12 05 0a	    DB 0x0B, 0x10, 0x03, 0x08, 0x0D, 0x12, 0x05, 0x0A 
+017e 0f 02 07 0c 11 04 09 0e	    DB 0x0F, 0x02, 0x07, 0x0C, 0x11, 0x04, 0x09, 0x0E 
+0186			 
+0186			init_upper_RAM: 
+0186 21 a8 04		    LD HL,block_to_relocate_to_fecd 
+0189 11 cd fe		    LD DE,relocation_destination 
+018c 01 87 00		    LD BC,0x87 
+018f ed b0		    LDIR 
+0191			 
+0191 21 34 01		    LD HL, disk_params                     
+0194 11 71 fe		    LD DE, disk_params_destination 
+0197 01 52 00		    LD BC,0x52 
+019a ed b0		    LDIR 
+019c			 
+019c af			    XOR A                                        ; Init some variables 
+019d 32 09 fc		    LD (DAT_ram_fc09),A 
+01a0 32 0b fc		    LD (DAT_ram_fc0b),A 
+01a3 3e 00		    LD A,0x0 
+01a5 32 17 fe		    LD (DAT_ram_fe17),A 
+01a8 3e ff		    LD A,0xff 
+01aa 32 16 fe		    LD (mem_fe16_active_disk),A 
+01ad 32 18 fe		    LD (mem_fe18_active_track),A 
+01b0 32 19 fe		    LD (mem_fe19_track),A 
+01b3 c9			    RET 
+01b4			 
+01b4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+01b4			; FLOPPY DISK 
+01b4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+01b4			 
+01b4			set_disk_for_next_access: 
+01b4 79			    LD A,C 
+01b5 32 00 fc		    LD (ram_fc00_disk_for_next_access),A 
+01b8 c3 1d 03		    JP fdc_set_disk 
+01bb			set_sector_for_next_access: 
+01bb 79			    LD A,C 
+01bc 32 03 fc		    LD (ram_fc03_sector_for_next_access),A 
+01bf 3a 17 fe		    LD A,(DAT_ram_fe17) 
+01c2 b7			    OR A 
+01c3 c2 e0 03		    JP NZ,fdc_set_sector_C 
+01c6 c9			    RET 
+01c7			set_DMA_address_for_next_access: 
+01c7 ed 43 14 fc	    LD (ram_fc14_DMA_address),BC 
+01cb c9			    RET 
+01cc			set_track_for_next_access: 
+01cc ed 43 01 fc	    LD (ram_fc01_track_for_next_access),BC 
+01d0 3a 17 fe		    LD A,(DAT_ram_fe17) 
+01d3 b7			    OR A 
+01d4 c2 d4 03		    JP NZ,fdc_seek_track_C 
+01d7 c9			    RET 
+01d8			fdc_restore_and_mem: 
+01d8 3a 17 fe		    LD A,(DAT_ram_fe17) 
+01db b7			    OR A 
+01dc c2 cb 03		    JP NZ,fdc_restore 
+01df 3a 0a fc		    LD A,(DAT_ram_fc0a) 
+01e2 b7			    OR A 
+01e3 c2 e9 01		    JP NZ,LAB_ram_01e9 
+01e6 32 09 fc		    LD (DAT_ram_fc09),A 
+01e9			LAB_ram_01e9: 
+01e9 c3 cb 03		    JP fdc_restore 
+01ec			 
+01ec			read_sector: 
+01ec 3a 17 fe		    LD A,(DAT_ram_fe17) 
+01ef b7			    OR A 
+01f0 c2 dc fe		    JP NZ,read_in_DMA_relocated 
+01f3 af			    XOR A 
+01f4 32 0b fc		    LD (DAT_ram_fc0b),A 
+01f7 3e 01		    LD A,0x1 
+01f9 32 12 fc		    LD (DAT_ram_fc12),A 
+01fc 32 11 fc		    LD (DAT_ram_fc11),A 
+01ff 3e 02		    LD A,0x2 
+0201 32 13 fc		    LD (DAT_ram_fc13),A 
+0204 c3 79 02		    JP LAB_ram_0279 
+0207			write_sector: 
+0207 3a 17 fe		    LD A,(DAT_ram_fe17) 
+020a b7			    OR A 
+020b c2 ed fe		    JP NZ,LAB_ram_feed 
+020e af			    XOR A 
+020f 32 12 fc		    LD (DAT_ram_fc12),A 
+0212 79			    LD A,C 
+0213 32 13 fc		    LD (DAT_ram_fc13),A 
+0216 fe 02		    CP 0x2 
+0218 c2 32 02		    JP NZ,LAB_ram_0232 
+021b 3e 08		    LD A,0x8 
+021d 32 0b fc		    LD (DAT_ram_fc0b),A 
+0220 3a 00 fc		    LD A,(ram_fc00_disk_for_next_access) 
+0223 32 0c fc		    LD (DAT_ram_fc0c),A 
+0226 2a 01 fc		    LD HL,(ram_fc01_track_for_next_access) 
+0229 22 0d fc		    LD (DAT_ram_fc0d),HL 
+022c 3a 03 fc		    LD A,(ram_fc03_sector_for_next_access) 
+022f 32 0f fc		    LD (DAT_ram_fc0f),A 
+0232			LAB_ram_0232: 
+0232 3a 0b fc		    LD A,(DAT_ram_fc0b) 
+0235 b7			    OR A 
+0236 ca 71 02		    JP Z,LAB_ram_0271 
+0239 3d			    DEC A 
+023a 32 0b fc		    LD (DAT_ram_fc0b),A 
+023d 3a 00 fc		    LD A,(ram_fc00_disk_for_next_access) 
+0240 21 0c fc		    LD HL,0xfc0c 
+0243 be			    CP (HL) 
+0244 c2 71 02		    JP NZ,LAB_ram_0271 
+0247 21 0d fc		    LD HL,0xfc0d 
+024a cd 11 03		    CALL FUN_ram_0311 
+024d c2 71 02		    JP NZ,LAB_ram_0271 
+0250 3a 03 fc		    LD A,(ram_fc03_sector_for_next_access) 
+0253 21 0f fc		    LD HL,0xfc0f 
+0256 be			    CP (HL) 
+0257 c2 71 02		    JP NZ,LAB_ram_0271 
+025a 34			    INC (HL) 
+025b 7e			    LD A,(HL) 
+025c fe 28		    CP 0x28 
+025e da 6a 02		    JP C,LAB_ram_026a 
+0261 36 00		    LD (HL),0x0 
+0263 2a 0d fc		    LD HL,(DAT_ram_fc0d) 
+0266 23			    INC HL 
+0267 22 0d fc		    LD (DAT_ram_fc0d),HL 
+026a			LAB_ram_026a: 
+026a af			    XOR A 
+026b 32 11 fc		    LD (DAT_ram_fc11),A 
+026e c3 79 02		    JP LAB_ram_0279 
+0271			LAB_ram_0271: 
+0271 af			    XOR A 
+0272 32 0b fc		    LD (DAT_ram_fc0b),A 
+0275 3c			    INC A 
+0276 32 11 fc		    LD (DAT_ram_fc11),A 
+0279			LAB_ram_0279: 
+0279 af			    XOR A 
+027a 32 10 fc		    LD (DAT_ram_fc10),A 
+027d 3a 03 fc		    LD A,(ram_fc03_sector_for_next_access) 
+0280 b7			    OR A 
+0281 1f			    RRA 
+0282 b7			    OR A 
+0283 1f			    RRA 
+0284 32 08 fc		    LD (DAT_ram_fc08),A 
+0287 21 09 fc		    LD HL,0xfc09 
+028a 7e			    LD A,(HL) 
+028b 36 01		    LD (HL),0x1 
+028d b7			    OR A 
+028e ca b5 02		    JP Z,LAB_ram_02b5 
+0291 3a 00 fc		    LD A,(ram_fc00_disk_for_next_access) 
+0294 21 04 fc		    LD HL,0xfc04 
+0297 be			    CP (HL) 
+0298 c2 ae 02		    JP NZ,LAB_ram_02ae 
+029b 21 05 fc		    LD HL,0xfc05 
+029e cd 11 03		    CALL FUN_ram_0311 
+02a1 c2 ae 02		    JP NZ,LAB_ram_02ae 
+02a4 3a 08 fc		    LD A,(DAT_ram_fc08) 
+02a7 21 07 fc		    LD HL,0xfc07 
+02aa be			    CP (HL) 
+02ab ca d2 02		    JP Z,LAB_ram_02d2 
+02ae			LAB_ram_02ae: 
+02ae 3a 0a fc		    LD A,(DAT_ram_fc0a) 
+02b1 b7			    OR A 
+02b2 c4 39 04		    CALL NZ,read_sector_yy 
+02b5			LAB_ram_02b5: 
+02b5 3a 00 fc		    LD A,(ram_fc00_disk_for_next_access) 
+02b8 32 04 fc		    LD (ram_fc04_disk_xx),A 
+02bb 2a 01 fc		    LD HL,(ram_fc01_track_for_next_access) 
+02be 22 05 fc		    LD (ram_fc05_track_xx),HL 
+02c1 3a 08 fc		    LD A,(DAT_ram_fc08) 
+02c4 32 07 fc		    LD (ram_fc07_sector_xx),A 
+02c7 3a 11 fc		    LD A,(DAT_ram_fc11) 
+02ca b7			    OR A 
+02cb c4 77 04		    CALL NZ,read_sector_xx 
+02ce af			    XOR A 
+02cf 32 0a fc		    LD (DAT_ram_fc0a),A 
+02d2			LAB_ram_02d2: 
+02d2 3a 03 fc		    LD A,(ram_fc03_sector_for_next_access) 
+02d5 e6 03		    AND 0x3 
+02d7 6f			    LD L,A 
+02d8 26 00		    LD H,0x0 
+02da 29			    ADD HL,HL 
+02db 29			    ADD HL,HL 
+02dc 29			    ADD HL,HL 
+02dd 29			    ADD HL,HL 
+02de 29			    ADD HL,HL 
+02df 29			    ADD HL,HL 
+02e0 29			    ADD HL,HL 
+02e1 11 16 fc		    LD DE,0xfc16 
+02e4 19			    ADD HL,DE 
+02e5 ed 5b 14 fc	    LD DE,(ram_fc14_DMA_address) 
+02e9 01 80 00		    LD BC,0x80 
+02ec 3a 12 fc		    LD A,(DAT_ram_fc12) 
+02ef b7			    OR A 
+02f0 20 06		    JR NZ,LAB_ram_02f8 
+02f2 3e 01		    LD A,0x1 
+02f4 32 0a fc		    LD (DAT_ram_fc0a),A 
+02f7 eb			    EX DE,HL 
+02f8			LAB_ram_02f8: 
+02f8 cd cd fe		    CALL move_RAM_relocated 
+02fb 3a 13 fc		    LD A,(DAT_ram_fc13) 
+02fe fe 01		    CP 0x1 
+0300 3a 10 fc		    LD A,(DAT_ram_fc10) 
+0303 c0			    RET NZ 
+0304 b7			    OR A 
+0305 c0			    RET NZ 
+0306 af			    XOR A 
+0307 32 0a fc		    LD (DAT_ram_fc0a),A 
+030a cd 39 04		    CALL read_sector_yy 
+030d 3a 10 fc		    LD A,(DAT_ram_fc10) 
+0310 c9			    RET 
+0311			FUN_ram_0311: 
+0311 eb			    EX DE,HL 
+0312 21 01 fc		    LD HL,0xfc01 
+0315 1a			    LD A,(DE) 
+0316 be			    CP (HL) 
+0317 c0			    RET NZ 
+0318 13			    INC DE 
+0319 23			    INC HL 
+031a 1a			    LD A,(DE) 
+031b be			    CP (HL) 
+031c c9			    RET 
+031d			fdc_set_disk: 
+031d 21 00 00		    LD HL,0x0 
+0320 79			    LD A,C 
+0321 fe 02		    CP 0x2 
+0323 d0			    RET NC 
+0324 b7			    OR A 
+0325 21 71 fe		    LD HL,0xfe71 
+0328 28 03		    JR Z,skip_for_disk_0 
+032a 21 82 fe		    LD HL,0xfe82 
+032d			skip_for_disk_0: 
+032d 3a 16 fe		    LD A,(mem_fe16_active_disk) 
+0330 b9			    CP C 
+0331 c8			    RET Z 
+0332 79			    LD A,C 
+0333 32 16 fe		    LD (mem_fe16_active_disk),A 
+0336 b7			    OR A 
+0337 e5			    PUSH HL 
+0338 11 10 00		    LD DE,0x10 
+033b 19			    ADD HL,DE 
+033c 7e			    LD A,(HL) 
+033d 32 17 fe		    LD (DAT_ram_fe17),A 
+0340 21 19 fe		    LD HL,0xfe19 
+0343 28 01		    JR Z,LAB_ram_0346 
+0345 2b			    DEC HL 
+0346			LAB_ram_0346: 
+0346 7e			    LD A,(HL) 
+0347 fe ff		    CP 0xff 
+0349 28 03		    JR Z,LAB_ram_034e 
+034b db 11		    IN A,(io_11_fdc_track) 
+034d 77			    LD (HL),A 
+034e			LAB_ram_034e: 
+034e 79			    LD A,C 
+034f b7			    OR A 
+0350 21 18 fe		    LD HL,0xfe18 
+0353 28 01		    JR Z,LAB_ram_0356 
+0355 23			    INC HL 
+0356			LAB_ram_0356: 
+0356 7e			    LD A,(HL) 
+0357 d3 11		    OUT (io_11_fdc_track),A 
+0359 eb			    EX DE,HL 
+035a e1			    POP HL 
+035b fe ff		    CP 0xff 
+035d c0			    RET NZ 
+035e cd ef 03		    CALL fdc_ensure_ready 
+0361 cd d8 01		    CALL fdc_restore_and_mem 
+0364			    ; Read address in single density 
+0364 db 1c		    IN A,(io_1c_system_bits) 
+0366 e6 df		    AND ~system_bit_double_density_mask          ; Disable double density  
+0368 f6 00		    OR 0x0 
+036a d3 1c		    OUT (io_1c_system_bits),A 
+036c cd c1 03		    CALL fdc_read_address 
+036f 28 0e		    JR Z,local_read_address_ok 
+0371			    ; Retry read address with double density 
+0371 db 1c		    IN A,(io_1c_system_bits) 
+0373 e6 df		    AND ~system_bit_double_density_mask  
+0375 f6 20		    OR system_bit_double_density_mask            ; Enable double density 
+0377 d3 1c		    OUT (io_1c_system_bits),A 
+0379 cd c1 03		    CALL fdc_read_address 
+037c c0			    RET NZ 
+037d 18 1e		    JR local_read_address_second_ok 
+037f			local_read_address_ok: 
+037f e5			    PUSH HL 
+0380 d5			    PUSH DE 
+0381 11 00 00		    LD DE,0x0000 
+0384 73			    LD (HL),E 
+0385 23			    INC HL 
+0386 72			    LD (HL),D 
+0387 11 09 00		    LD DE,0x0009 
+038a 19			    ADD HL,DE 
+038b 11 a2 fe		    LD DE,0xfea2 
+038e 73			    LD (HL),E 
+038f 23			    INC HL 
+0390 72			    LD (HL),D 
+0391 11 05 00		    LD DE,0x0005 
+0394 19			    ADD HL,DE 
+0395 3e 00		    LD A,0x0 
+0397 77			    LD (HL),A 
+0398 32 17 fe		    LD (DAT_ram_fe17),A 
+039b 18 1c		    JR local_read_address_end 
+039d			local_read_address_second_ok: 
+039d e5			    PUSH HL 
+039e d5			    PUSH DE 
+039f 11 b1 fe		    LD DE,0xfeb1 
+03a2 73			    LD (HL),E 
+03a3 23			    INC HL 
+03a4 72			    LD (HL),D 
+03a5 11 09 00		    LD DE,0x0009 
+03a8 19			    ADD HL,DE 
+03a9 11 93 fe		    LD DE,0xfe93 
+03ac 73			    LD (HL),E 
+03ad 23			    INC HL 
+03ae 72			    LD (HL),D 
+03af 11 05 00		    LD DE,0x5 
+03b2 19			    ADD HL,DE 
+03b3 3e 20		    LD A,0x20 
+03b5 77			    LD (HL),A 
+03b6 32 17 fe		    LD (DAT_ram_fe17),A 
+03b9			local_read_address_end: 
+03b9 d1			    POP DE 
+03ba e1			    POP HL 
+03bb db 12		    IN A,(io_12_fdc_sector) 
+03bd d3 11		    OUT (io_11_fdc_track),A 
+03bf 12			    LD (DE),A 
+03c0 c9			    RET 
+03c1			fdc_read_address: 
+03c1 3e c4		    LD A,0xc4 
+03c3 d3 10		    OUT (io_10_fdc_command_status),A 
+03c5 cd 31 04		    CALL fdc_halt 
+03c8 cb 67		    BIT 0x4,A 
+03ca c9			    RET 
+03cb			fdc_restore: 
+03cb cd ef 03		    CALL fdc_ensure_ready 
+03ce 3e 00		    LD A,0x0 
+03d0 d3 10		    OUT (io_10_fdc_command_status),A 
+03d2 18 5d		    JR fdc_halt 
+03d4			fdc_seek_track_C: 
+03d4 cd ef 03		    CALL fdc_ensure_ready 
+03d7 79			    LD A,C 
+03d8 d3 13		    OUT (io_13_fdc_data),A 
+03da 3e 10		    LD A,0x10 
+03dc d3 10		    OUT (io_10_fdc_command_status),A 
+03de 18 51		    JR fdc_halt 
+03e0			fdc_set_sector_C: 
+03e0 79			    LD A,C 
+03e1 d3 12		    OUT (io_12_fdc_sector),A 
+03e3 c9			    RET 
+03e4			sector_translation: 
+03e4 7a			    LD A,D 
+03e5 b3			    OR E 
+03e6 60			    LD H,B 
+03e7 69			    LD L,C 
+03e8 c8			    RET Z 
+03e9 eb			    EX DE,HL 
+03ea 09			    ADD HL,BC 
+03eb 6e			    LD L,(HL) 
+03ec 26 00		    LD H,0x0 
+03ee c9			    RET 
+03ef			fdc_ensure_ready: 
+03ef e5			    PUSH HL 
+03f0 d5			    PUSH DE 
+03f1 c5			    PUSH BC 
+03f2 3e d0		    LD A,0xd0 
+03f4 d3 10		    OUT (io_10_fdc_command_status),A 
+03f6 cd 0f 04		    CALL turn_on_motor 
+03f9			 
+03f9 3a 16 fe		    LD A,(mem_fe16_active_disk) 
+03fc 5f			    LD E,A 
+03fd db 1c		    IN A,(io_1c_system_bits) 
+03ff e6 fc		    AND ~(system_bit_drive_a_mask|system_bit_drive_b_mask) ; Clear drive select bits 
+0401 b3			    OR E 
+0402 3c			    INC A                                          ; disk A(0) to mask 0x1, disk B(1) to mask 0x2 
+0403 e6 df		    AND ~system_bit_double_density_mask            ; Disable double density 
+0405 21 17 fe		    LD HL,DAT_ram_fe17 
+0408 b6			    OR (HL) 
+0409 d3 1c		    OUT (io_1c_system_bits),A 
+040b c1			    POP BC 
+040c d1			    POP DE 
+040d e1			    POP HL 
+040e c9			    RET 
+040f			 
+040f			turn_on_motor: 
+040f			    ; Is it already on? 
+040f db 1c		    IN A,(io_1c_system_bits) 
+0411 cb 77		    BIT system_bit_motors,A 
+0413			    ; Return if it is 
+0413 c8			    RET Z 
+0414			    ; Turn on 
+0414 cb b7		    RES system_bit_motors,A 
+0416 d3 1c		    OUT (io_1c_system_bits),A 
+0418			    ; Wait for motor to get some speed 
+0418 06 32		    LD B,0x32 
+041a cd 25 04		    CALL wait_B 
+041d c9			    RET 
+041e			 
+041e			turn_off_motor: 
+041e			    ; Turn off in any case 
+041e db 1c		    IN A,(io_1c_system_bits) 
+0420 cb f7		    SET system_bit_motors,A 
+0422 d3 1c		    OUT (io_1c_system_bits),A 
+0424 c9			    RET 
+0425			 
+0425			wait_B: 
+0425			    ; wait time in B 
+0425 11 86 06		    LD DE,0x686 
+0428			wait_B_inner_loop: 
+0428 1b			    DEC DE 
+0429 7a			    LD A,D 
+042a b3			    OR E 
+042b c2 28 04		    JP NZ,wait_B_inner_loop 
+042e 10 f5		    DJNZ wait_B                                  ; Do wait_B again with B-1 
+0430 c9			    RET 
+0431			 
+0431			fdc_halt: 
+0431			    ; The fdc generates a NMI when it requires attention. The NMI handler 
+0431			    ; is just a RET that will stop the HALT and execute the next instruction. 
+0431 76			    HALT 
+0432			wait_while_busy: 
+0432 db 10		    IN A,(io_10_fdc_command_status) 
+0434 cb 47		    BIT 0x0,A 
+0436 20 fa		    JR NZ,wait_while_busy 
+0438 c9			    RET 
+0439			 
+0439			read_sector_yy: 
+0439 2e 03		    LD L,0x3 
+043b			LAB_ram_043b: 
+043b 11 0f 04		    LD DE,0x040f 
+043e			LAB_ram_043e: 
+043e e5			    PUSH HL 
+043f d5			    PUSH DE 
+0440 cd 92 04		    CALL go_to_track_sector 
+0443 cd f4 fe		    CALL SUB_ram_fef4 
+0446 d1			    POP DE 
+0447 e1			    POP HL 
+0448 28 0d		    JR Z,LAB_ram_0457 
+044a 1d			    DEC E 
+044b 20 f1		    JR NZ,LAB_ram_043e 
+044d 15			    DEC D 
+044e 28 1c		    JR Z,LAB_ram_046c 
+0450 cd cb 03		    CALL fdc_restore 
+0453 1e 0f		    LD E,0xf 
+0455 18 e7		    JR LAB_ram_043e 
+0457			LAB_ram_0457: 
+0457 06 00		    LD B,0x0 
+0459 3e 88		    LD A,0x88 
+045b d3 10		    OUT (io_10_fdc_command_status),A 
+045d			LAB_ram_045d: 
+045d 76			    HALT 
+045e db 13		    IN A,(io_13_fdc_data) 
+0460 10 fb		    DJNZ LAB_ram_045d 
+0462			LAB_ram_0462: 
+0462 76			    HALT 
+0463 db 13		    IN A,(io_13_fdc_data) 
+0465 10 fb		    DJNZ LAB_ram_0462 
+0467 cd 31 04		    CALL fdc_halt 
+046a e6 9c		    AND 0x9c 
+046c			LAB_ram_046c: 
+046c 32 10 fc		    LD (DAT_ram_fc10),A 
+046f c8			    RET Z 
+0470 2d			    DEC L 
+0471 20 c8		    JR NZ,LAB_ram_043b 
+0473 3e ff		    LD A,0xff 
+0475 18 f5		    JR LAB_ram_046c 
+0477			read_sector_xx: 
+0477 11 0f 04		    LD DE,0x40f 
+047a			LAB_ram_047a: 
+047a d5			    PUSH DE 
+047b cd 92 04		    CALL go_to_track_sector 
+047e cd e3 fe		    CALL read_to_upper_relocated 
+0481 32 10 fc		    LD (DAT_ram_fc10),A 
+0484 d1			    POP DE 
+0485 c8			    RET Z 
+0486 1d			    DEC E 
+0487 20 f1		    JR NZ,LAB_ram_047a 
+0489 15			    DEC D 
+048a c8			    RET Z 
+048b cd cb 03		    CALL fdc_restore 
+048e 1e 0f		    LD E,0xf 
+0490 18 e8		    JR LAB_ram_047a 
+0492			go_to_track_sector: 
+0492 3a 04 fc		    LD A,(ram_fc04_disk_xx) 
+0495 4f			    LD C,A 
+0496 cd 1d 03		    CALL fdc_set_disk 
+0499 ed 4b 05 fc	    LD BC,(ram_fc05_track_xx) 
+049d cd d4 03		    CALL fdc_seek_track_C 
+04a0 3a 07 fc		    LD A,(ram_fc07_sector_xx) 
+04a3 4f			    LD C,A 
+04a4 cd e0 03		    CALL fdc_set_sector_C 
+04a7 c9			    RET 
+04a8			 
+04a8			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+04a8			; CODE RELOCATED TO UPPER RAM 
+04a8			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+04a8			 
+04a8			block_to_relocate_to_fecd: 
+04a8			reloc_move_RAM: 
+04a8			    ; Hide the ROM 
+04a8 db 1c		    IN A,(io_1c_system_bits) 
+04aa cb bf		    RES system_bit_bank,A 
+04ac d3 1c		    OUT (io_1c_system_bits),A 
+04ae			    ; Copy the bytes 
+04ae ed b0		    LDIR 
+04b0			    ; Show the ROM 
+04b0 db 1c		    IN A,(io_1c_system_bits) 
+04b2 cb ff		    SET system_bit_bank,A 
+04b4 d3 1c		    OUT (io_1c_system_bits),A 
+04b6 c9			    RET 
+04b7			reloc_read_in_DMA: 
+04b7 2a 14 fc		    LD HL,(ram_fc14_DMA_address) 
+04ba 06 01		    LD B,0x1 
+04bc 18 05		    JR reloc_read_internal 
+04be			reloc_read_to_upper: 
+04be 21 16 fc		    LD HL,0xfc16 
+04c1 06 04		    LD B,0x4 
+04c3			reloc_read_internal: 
+04c3 11 88 9c		    LD DE,0x9c88 
+04c6 18 0f		    JR reloc_RW_internal 
+04c8			reloc_write_to_DMA: 
+04c8 2a 14 fc		    LD HL,(ram_fc14_DMA_address) 
+04cb 06 01		    LD B,0x1 
+04cd 18 05		    JR reloc_write_internal 
+04cf			reloc_write_from_upper: 
+04cf 21 16 fc		    LD HL,0xfc16 
+04d2 06 04		    LD B,0x4 
+04d4			reloc_write_internal: 
+04d4 11 ac fc		    LD DE,0xfcac 
+04d7			reloc_RW_internal: 
+04d7 cd ef 03		    CALL fdc_ensure_ready 
+04da f3			    DI 
+04db			    ; Hide the ROM 
+04db db 1c		    IN A,(io_1c_system_bits) 
+04dd cb bf		    RES system_bit_bank,A 
+04df d3 1c		    OUT (io_1c_system_bits),A 
+04e1			    ; Setup RET as the handler of NMI 
+04e1			    ; as the ROM is paged out, there is no handler 
+04e1			    ; Store the previous value to restore it later 
+04e1 e5			    PUSH HL 
+04e2 21 66 00		    LD HL, nmi_isr 
+04e5 7e			    LD A,(HL) 
+04e6 08			    EX AF,AF' 
+04e7 36 c9		    LD (HL), RET_opcode 
+04e9 e1			    POP HL 
+04ea			 
+04ea 78			    LD A,B 
+04eb 01 13 80		    LD BC, sector_size * 0x100 + io_13_fdc_data  ; Setup of the INI command 
+04ee cb 47		    BIT 0x0,A 
+04f0 20 02		    JR NZ,LAB_ram_04f4 
+04f2 06 00		    LD B,0x0 
+04f4			LAB_ram_04f4: 
+04f4 fe 01		    CP 0x1 
+04f6 f5			    PUSH AF 
+04f7 7b			    LD A,E 
+04f8 fe ac		    CP 0xac 
+04fa 28 11		    JR Z,reloc_write_sector 
+04fc d3 10		    OUT (io_10_fdc_command_status),A 
+04fe f1			    POP AF 
+04ff 28 05		    JR Z,reloc_read_second_half_of_sector 
+0501			reloc_read_first_half_of_sector: 
+0501 76			    HALT 
+0502 ed a2		    INI                                          ; IN from io_13_fdc_data 
+0504 20 fb		    JR NZ,reloc_read_first_half_of_sector 
+0506			reloc_read_second_half_of_sector: 
+0506 76			    HALT 
+0507 ed a2		    INI                                          ; IN from io_13_fdc_data 
+0509 20 fb		    JR NZ,reloc_read_second_half_of_sector 
+050b 18 0f		    JR read_sector_completed 
+050d			reloc_write_sector: 
+050d d3 10		    OUT (io_10_fdc_command_status),A 
+050f f1			    POP AF 
+0510 28 05		    JR Z,reloc_write_second_half_of_sector 
+0512			reloc_write_first_half_of_sector: 
+0512 76			    HALT 
+0513 ed a3		    OUTI                                         ; OUT to io_13_fdc_data 
+0515 20 fb		    JR NZ,reloc_write_first_half_of_sector 
+0517			reloc_write_second_half_of_sector: 
+0517 76			    HALT 
+0518 ed a3		    OUTI                                         ; OUT to io_13_fdc_data 
+051a 20 fb		    JR NZ,reloc_write_second_half_of_sector 
+051c			read_sector_completed: 
+051c			    ; Restore the byte that was on the NMI handler 
+051c 08			    EX AF,AF' 
+051d 32 66 00		    LD (nmi_isr),A 
+0520			    ; Restore the ROM 
+0520 db 1c		    IN A,(io_1c_system_bits) 
+0522 cb ff		    SET system_bit_bank,A 
+0524 d3 1c		    OUT (io_1c_system_bits),A 
+0526 fb			    EI 
+0527			    ; Wait for the disk access result code 
+0527 cd 31 04		    CALL fdc_halt 
+052a			    ; Return the result code: 0 or 1 
+052a a2			    AND D 
+052b c8			    RET Z 
+052c 3e 01		    LD A,0x1 
+052e c9			    RET 
+052f			 
+052f			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+052f			; IO PORTS INITIALIZATION 
+052f			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+052f			 
+052f			 
+052f			init_ports_count: 
+052f 1c			    DB 0x1C 
+0530			init_ports_data: 
+0530			    ; The first byte is the value to OUT on the port given by the second byte 
+0530 07 18		    DW 0x1807 
+0532 0c 05		    DW 0x050C 
+0534 07 04		    DW 0x0407 
+0536 07 44		    DW 0x4407 
+0538 07 03		    DW 0x0307 
+053a 07 c1		    DW 0xC107 
+053c 07 05		    DW 0x0507 
+053e 07 e8		    DW 0xE807 
+0540 07 01		    DW 0x0107 
+0542 07 00		    DW 0x0007 
+0544 06 18		    DW 0x1806 
+0546 00 05		    DW 0x0500 
+0548 06 04		    DW 0x0406 
+054a 06 44		    DW 0x4406 
+054c 06 03		    DW 0x0306 
+054e 06 e1		    DW 0xE106 
+0550 06 05		    DW 0x0506 
+0552 06 e8		    DW 0xE806 
+0554 06 01		    DW 0x0106 
+0556 06 00		    DW 0x0006 
+0558 1d 03		    DW 0x031D 
+055a 1c 81		    DW 0x811C 
+055c 1d cf		    DW 0xCF1D 
+055e 1d 0c		    DW 0x0C1D 
+0560 09 03		    DW 0x0309 
+0562 09 0f		    DW 0x0F09 
+0564 0b 03		    DW 0x030B 
+0566 0b 4f		    DW 0x4F0B 
+0568			init_ports: 
+0568 21 2f 05		    LD HL,init_ports_count 
+056b 46			    LD B,(HL) 
+056c			init_port_loop: 
+056c 23			    INC HL 
+056d 4e			    LD C,(HL) 
+056e 23			    INC HL 
+056f 7e			    LD A,(HL) 
+0570 ed 79		    OUT (C),A                                    ; An out for each pair of bytes in init_ports_data 
+0572 10 f8		    DJNZ init_port_loop 
+0574 c9			    RET 
+0575			 
+0575			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0575			; KEYBOARD 
+0575			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0575			 
+0575			is_key_pressed: 
+0575			    ; return 0 or FF in A 
+0575 db 07		    IN A,(io_07_keyboard_control) 
+0577 e6 01		    AND 0x1 
+0579 c8			    RET Z 
+057a 3e ff		    LD A,0xff 
+057c c9			    RET 
+057d			 
+057d			get_key: 
+057d			    ; return char in A 
+057d cd 75 05		    CALL is_key_pressed 
+0580 28 fb		    JR Z,get_key 
+0582 db 05		    IN A,(io_05_keyboard_data) 
+0584 cd 92 05		    CALL translate_keyboard_in_a 
+0587 c9			    RET 
+0588			 
+0588			keyboard_out: 
+0588			    ; char in C. C=4 for the bell. 
+0588 db 07		    IN A,(io_07_keyboard_control) 
+058a e6 04		    AND 0x4 
+058c 28 fa		    JR Z,keyboard_out                            ; Loop until a key is pressed 
+058e 79			    LD A,C 
+058f d3 05		    OUT (io_05_keyboard_data),A 
+0591 c9			    RET 
+0592			 
+0592			translate_keyboard_in_a: 
+0592 21 a7 05		    LD HL,translate_keyboard_keys 
+0595 01 13 00		    LD BC,translate_keyboard_size 
+0598 ed b1		    CPIR 
+059a c0			    RET NZ                                       ; Return the key not translated 
+059b			    ; key found, replace with the corresponding char 
+059b 11 a7 05		    LD DE,translate_keyboard_keys 
+059e b7			    OR A 
+059f ed 52		    SBC HL,DE 
+05a1 11 b9 05		    LD DE,translate_keyboard_values 
+05a4 19			    ADD HL,DE 
+05a5 7e			    LD A,(HL) 
+05a6 c9			    RET 
+05a7			translate_keyboard_size: EQU 0x13 
+05a7			translate_keyboard_keys: 
+05a7 f1 f2 f3 f4 b1 c0 c1 c2	    DB 0xF1, 0xF2, 0xF3, 0xF4, 0xB1, 0xC0, 0xC1, 0xC2 
+05af d0 d1 d2 e1 e2 e3 e4 d3	    DB 0xD0, 0xD1, 0xD2, 0xE1, 0xE2, 0xE3, 0xE4, 0xD3 
+05b7 c3 b2		    DB 0xC3, 0xB2                                ; The 0xff from the values table is used as the last key 
+05b9			translate_keyboard_values: 
+05b9 ff 80 81 82 83 84 85 86	    DB 0xFF, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86 
+05c1 87 88 89 8a 8b 8c 8d 8e	    DB 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E 
+05c9 8f 90 91		    DB 0x8F, 0x90, 0x91 
+05cc			 
+05cc			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+05cc			; SERIAL 
+05cc			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+05cc			 
+05cc			is_serial_byte_ready: 
+05cc			    ; return 0 or FF in A 
+05cc db 06		    IN A,(io_06_serial_control) 
+05ce e6 01		    AND 0x1 
+05d0 18 1c		    JR force_0_or_ff 
+05d2			 
+05d2			get_byte_from_serial: 
+05d2			    ; return char in A 
+05d2 cd cc 05		    CALL is_serial_byte_ready 
+05d5 28 fb		    JR Z,get_byte_from_serial 
+05d7 db 04		    IN A,(io_04_serial_data) 
+05d9 c9			    RET 
+05da			 
+05da			serial_out: 
+05da			    ; char in C 
+05da db 06		    IN A,(io_06_serial_control) 
+05dc e6 04		    AND 0x4 
+05de 28 fa		    JR Z,serial_out                              ; Loop until a byte is ready 
+05e0 79			    LD A,C 
+05e1 d3 04		    OUT (io_04_serial_data),A 
+05e3 c9			    RET 
+05e4			serial_get_control: 
+05e4 db 06		    IN A,(io_06_serial_control) 
+05e6 e6 04		    AND 0x4 
+05e8 18 04		    JR force_0_or_ff 
+05ea			 
+05ea			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+05ea			; PARALLEL 
+05ea			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+05ea			 
+05ea			lpt_status: 
+05ea			    ; return 0 or FF in A 
+05ea db 1c		    IN A,(io_1c_system_bits) 
+05ec cb 5f		    BIT system_bit_centronicsReady,A 
+05ee			force_0_or_ff: 
+05ee c8			    RET Z 
+05ef 3e ff		    LD A,0xff 
+05f1 c9			    RET 
+05f2			lpt_output: 
+05f2			    ; char in C 
+05f2			    ; Loop until the printer is ready 
+05f2 cd ea 05		    CALL lpt_status 
+05f5 28 fb		    JR Z,lpt_output 
+05f7			    ; Ouput the byte in C 
+05f7 79			    LD A,C 
+05f8 d3 08		    OUT (io_08_parallel_data),A 
+05fa			    ; Pulse the strobe signal 
+05fa db 1c		    IN A,(io_1c_system_bits) 
+05fc cb e7		    SET system_bit_centronicsStrobe,A 
+05fe d3 1c		    OUT (io_1c_system_bits),A 
+0600 cb a7		    RES system_bit_centronicsStrobe,A 
+0602 d3 1c		    OUT (io_1c_system_bits),A 
+0604 c9			    RET 
+0605			 
+0605			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0605			; CONSOLE OUTPUT 
+0605			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0605			 
+0605			init_screen: 
+0605 3e 20		    LD A,0x20 
+0607 32 6d fe		    LD (DAT_ram_fe6d),A 
+060a cd c4 06		    CALL console_clear_screen 
+060d 22 6e fe		    LD (RAM_fe6e_cursor),HL 
+0610 af			    XOR A 
+0611 32 6c fe		    LD (DAT_ram_fe6c),A 
+0614 3e 17		    LD A,0x17 
+0616 d3 14		    OUT (io_14_scroll_register),A 
+0618 3e 7f		    LD A,0x7f 
+061a 32 70 fe		    LD (DAT_ram_fe70),A 
+061d c9			    RET 
+061e			 
+061e			console_write_c: 
+061e 3a 6c fe		    LD A,(DAT_ram_fe6c) 
+0621 b7			    OR A 
+0622 c2 3b 07		    JP NZ,LAB_ram_073b 
+0625 3e 07		    LD A,0x7                                                                   ; ^G, BEL 
+0627 b9			    CP C 
+0628 20 05		    JR NZ,console_write_c_cont 
+062a 0e 04		    LD C,0x4 
+062c c3 88 05		    JP keyboard_out 
+062f			console_write_c_cont: 
+062f cd 22 07		    CALL set_hl_to_cursor_a_to_char_cleaned 
+0632 11 95 07		    LD DE,0x795 
+0635 d5			    PUSH DE 
+0636 79			    LD A,C 
+0637 fe 0a		    CP 0xa 
+0639 28 64		    JR Z,console_line_feed 
+063b fe 0d		    CP 0xd 
+063d ca 30 07		    JP Z,console_carriage_return 
+0640 fe 08		    CP 0x8 
+0642 28 61		    JR Z,console_backspace 
+0644 fe 0c		    CP 0xc 
+0646 28 63		    JR Z,console_right 
+0648 fe 0b		    CP 0xb 
+064a 28 67		    JR Z,console_up 
+064c fe 1b		    CP 0x1b 
+064e ca 35 07		    JP Z,store_1_in_fe6c 
+0651 fe 18		    CP 0x18 
+0653 ca fd 06		    JP Z,console_erase_to_end_of_line 
+0656 fe 17		    CP 0x17 
+0658 28 7f		    JR Z,console_erase_to_end_of_screen 
+065a fe 1a		    CP 0x1a 
+065c 28 66		    JR Z,console_clear_screen 
+065e fe 1e		    CP 0x1e 
+0660 28 73		    JR Z,console_home_cursor 
+0662 fe 60		    CP 0x60 
+0664 38 04		    JR C,LAB_ram_066a 
+0666 3a 70 fe		    LD A,(DAT_ram_fe70) 
+0669 a1			    AND C 
+066a			LAB_ram_066a: 
+066a 77			    LD (HL),A 
+066b 23			    INC HL 
+066c 7d			    LD A,L 
+066d e6 7f		    AND 0x7f 
+066f fe 50		    CP 0x50 
+0671 d8			    RET C 
+0672 cd 30 07		    CALL console_carriage_return 
+0675 18 28		    JR console_line_feed 
+0677			LAB_ram_0677: 
+0677 11 ff 3b		    LD DE,0x3bff 
+067a 7a			    LD A,D 
+067b bc			    CP H 
+067c 38 04		    JR C,LAB_ram_0682 
+067e c0			    RET NZ 
+067f 7b			    LD A,E 
+0680 bd			    CP L 
+0681 d0			    RET NC 
+0682			LAB_ram_0682: 
+0682 06 17		    LD B,0x17 
+0684 21 80 30		    LD HL,0x3080 
+0687 11 00 30		    LD DE,address_vram 
+068a			LAB_ram_068a: 
+068a c5			    PUSH BC 
+068b 01 50 00		    LD BC,0x50 
+068e ed b0		    LDIR 
+0690 01 30 00		    LD BC,0x30 
+0693 09			    ADD HL,BC 
+0694 eb			    EX DE,HL 
+0695 09			    ADD HL,BC 
+0696 eb			    EX DE,HL 
+0697 c1			    POP BC 
+0698 10 f0		    DJNZ LAB_ram_068a 
+069a 21 80 3b		    LD HL,0x3b80 
+069d 18 5e		    JR console_erase_to_end_of_line 
+069f			 
+069f			console_line_feed: 
+069f 11 80 00		    LD DE,0x80 
+06a2 19			    ADD HL,DE 
+06a3 18 d2		    JR LAB_ram_0677 
+06a5			 
+06a5			console_backspace: 
+06a5 7d			    LD A,L 
+06a6 e6 7f		    AND 0x7f 
+06a8 c8			    RET Z 
+06a9 2b			    DEC HL 
+06aa c9			    RET 
+06ab			 
+06ab			console_right: 
+06ab 7d			    LD A,L 
+06ac e6 7f		    AND 0x7f 
+06ae fe 4f		    CP 0x4f 
+06b0 d0			    RET NC 
+06b1 23			    INC HL 
+06b2 c9			    RET 
+06b3			 
+06b3			console_up: 
+06b3 e5			    PUSH HL 
+06b4 11 80 ff		    LD DE,0xff80 
+06b7 19			    ADD HL,DE 
+06b8 e5			    PUSH HL 
+06b9 b7			    OR A 
+06ba 11 00 30		    LD DE,address_vram 
+06bd ed 52		    SBC HL,DE 
+06bf e1			    POP HL 
+06c0 d1			    POP DE 
+06c1 d0			    RET NC 
+06c2 eb			    EX DE,HL 
+06c3 c9			    RET 
+06c4			 
+06c4			console_clear_screen: 
+06c4 21 00 30		    LD HL,address_vram 
+06c7 11 01 30		    LD DE,address_vram+1 
+06ca 01 ff 0b		    LD BC,0xbff 
+06cd 36 20		    LD (HL),0x20 
+06cf ed b0		    LDIR 
+06d1 21 00 30		    LD HL,address_vram 
+06d4 c9			    RET 
+06d5			 
+06d5			console_home_cursor: 
+06d5 21 00 30		    LD HL,address_vram 
+06d8 c9			    RET 
+06d9			 
+06d9			console_erase_to_end_of_screen: 
+06d9 e5			    PUSH HL 
+06da cd fd 06		    CALL console_erase_to_end_of_line 
+06dd 11 80 00		    LD DE,0x80 
+06e0 7d			    LD A,L 
+06e1 e6 80		    AND 0x80 
+06e3 6f			    LD L,A 
+06e4 19			    ADD HL,DE 
+06e5 3e 3c		    LD A,0x3c 
+06e7 bc			    CP H 
+06e8 28 11		    JR Z,LAB_ram_06fb 
+06ea 5d			    LD E,L 
+06eb 54			    LD D,H 
+06ec b7			    OR A 
+06ed 21 ff 3b		    LD HL,0x3bff 
+06f0 ed 52		    SBC HL,DE 
+06f2 4d			    LD C,L 
+06f3 44			    LD B,H 
+06f4 62			    LD H,D 
+06f5 6b			    LD L,E 
+06f6 13			    INC DE 
+06f7 36 20		    LD (HL),0x20 
+06f9 ed b0		    LDIR 
+06fb			LAB_ram_06fb: 
+06fb e1			    POP HL 
+06fc c9			    RET 
+06fd			 
+06fd			console_erase_to_end_of_line: 
+06fd 7d			    LD A,L 
+06fe e6 7f		    AND 0x7f 
+0700 fe 4f		    CP 0x4f 
+0702 38 03		    JR C,console_erase_to_end_of_line_cont 
+0704 36 20		    LD (HL),0x20 
+0706 c9			    RET 
+0707			console_erase_to_end_of_line_cont: 
+0707 e5			    PUSH HL 
+0708 e5			    PUSH HL 
+0709 7d			    LD A,L 
+070a e6 80		    AND 0x80 
+070c 6f			    LD L,A 
+070d 11 4f 00		    LD DE,0x004f 
+0710 19			    ADD HL,DE 
+0711 d1			    POP DE 
+0712 d5			    PUSH DE 
+0713 b7			    OR A 
+0714 ed 52		    SBC HL,DE 
+0716 4d			    LD C,L 
+0717 44			    LD B,H 
+0718 e1			    POP HL 
+0719 5d			    LD E,L 
+071a 54			    LD D,H 
+071b 13			    INC DE 
+071c 36 20		    LD (HL),0x20 
+071e ed b0		    LDIR 
+0720 e1			    POP HL 
+0721 c9			    RET 
+0722			 
+0722			set_hl_to_cursor_a_to_char_cleaned: 
+0722 2a 6e fe		    LD HL,(RAM_fe6e_cursor) 
+0725 7e			    LD A,(HL) 
+0726 fe df		    CP 0xdf 
+0728 3e 20		    LD A,0x20 
+072a 20 01		    JR NZ,LAB_ram_072d 
+072c 77			    LD (HL),A 
+072d			LAB_ram_072d: 
+072d cb be		    RES 0x7,(HL) 
+072f c9			    RET 
+0730			 
+0730			console_carriage_return: 
+0730 7d			    LD A,L 
+0731 e6 80		    AND 0x80 
+0733 6f			    LD L,A 
+0734 c9			    RET 
+0735			 
+0735			store_1_in_fe6c: 
+0735 3e 01		    LD A,0x1 
+0737 32 6c fe		    LD (DAT_ram_fe6c),A 
+073a c9			    RET 
+073b			 
+073b			LAB_ram_073b: 
+073b 21 a2 07		    LD HL,0x7a2 
+073e e5			    PUSH HL 
+073f 21 6c fe		    LD HL,0xfe6c 
+0742 36 00		    LD (HL),0x0 
+0744 fe 01		    CP 0x1 
+0746 20 19		    JR NZ,LAB_ram_0761 
+0748 79			    LD A,C 
+0749 cb bf		    RES 0x7,A 
+074b fe 47		    CP 0x47 
+074d 28 54		    JR Z,store_1f_in_fe70 
+074f fe 41		    CP 0x41 
+0751 28 56		    JR Z,store_7f_in_fe70 
+0753 fe 52		    CP 0x52 
+0755 28 58		    JR Z,LAB_ram_07af 
+0757 fe 45		    CP 0x45 
+0759 28 66		    JR Z,LAB_ram_07c1 
+075b fe 3d		    CP 0x3d 
+075d c0			    RET NZ 
+075e 36 02		    LD (HL),0x2 
+0760 c9			    RET 
+0761			 
+0761			LAB_ram_0761: 
+0761 fe 02		    CP 0x2 
+0763 20 07		    JR NZ,LAB_ram_076c 
+0765 79			    LD A,C 
+0766 32 6d fe		    LD (DAT_ram_fe6d),A 
+0769 36 03		    LD (HL),0x3 
+076b c9			    RET 
+076c			LAB_ram_076c: 
+076c fe 03		    CP 0x3 
+076e c0			    RET NZ 
+076f cd 22 07		    CALL set_hl_to_cursor_a_to_char_cleaned 
+0772 e1			    POP HL 
+0773 21 00 30		    LD HL,address_vram 
+0776 79			    LD A,C 
+0777 d6 20		    SUB 0x20 
+0779			 
+0779			LAB_ram_0779: 
+0779 d6 50		    SUB 0x50 
+077b 30 fc		    JR NC,LAB_ram_0779 
+077d c6 50		    ADD A,0x50 
+077f 6f			    LD L,A 
+0780 3a 6d fe		    LD A,(DAT_ram_fe6d) 
+0783 d6 20		    SUB 0x20 
+0785			 
+0785			LAB_ram_0785: 
+0785 d6 18		    SUB 0x18 
+0787 30 fc		    JR NC,LAB_ram_0785 
+0789 c6 18		    ADD A,0x18 
+078b 11 80 00		    LD DE,0x80 
+078e			 
+078e			LAB_ram_078e: 
+078e ca 95 07		    JP Z,LAB_ram_0795 
+0791 19			    ADD HL,DE 
+0792 3d			    DEC A 
+0793 18 f9		    JR LAB_ram_078e 
+0795			 
+0795			LAB_ram_0795: 
+0795 7e			    LD A,(HL) 
+0796 fe 20		    CP 0x20 
+0798 20 02		    JR NZ,LAB_ram_079c 
+079a 3e df		    LD A,0xdf 
+079c			LAB_ram_079c: 
+079c cb ff		    SET 0x7,A 
+079e 77			    LD (HL),A 
+079f 22 6e fe		    LD (RAM_fe6e_cursor),HL 
+07a2 c9			    RET 
+07a3			 
+07a3			store_1f_in_fe70: 
+07a3 3e 1f		    LD A,0x1f 
+07a5 32 70 fe		    LD (DAT_ram_fe70),A 
+07a8 c9			    RET 
+07a9			 
+07a9			store_7f_in_fe70: 
+07a9 3e 7f		    LD A,0x7f 
+07ab 32 70 fe		    LD (DAT_ram_fe70),A 
+07ae c9			    RET 
+07af			 
+07af			LAB_ram_07af: 
+07af e1			    POP HL 
+07b0 cd d8 07		    CALL FUN_ram_07d8 
+07b3 d5			    PUSH DE 
+07b4 28 02		    JR Z,LAB_ram_07b8 
+07b6 ed b0		    LDIR 
+07b8			LAB_ram_07b8: 
+07b8 21 80 3b		    LD HL,0x3b80 
+07bb cd fd 06		    CALL console_erase_to_end_of_line 
+07be e1			    POP HL 
+07bf 18 d4		    JR LAB_ram_0795 
+07c1			 
+07c1			LAB_ram_07c1: 
+07c1 e1			    POP HL 
+07c2 cd d8 07		    CALL FUN_ram_07d8 
+07c5 d5			    PUSH DE 
+07c6 28 08		    JR Z,LAB_ram_07d0 
+07c8 11 ff 3b		    LD DE,0x3bff 
+07cb 21 7f 3b		    LD HL,0x3b7f 
+07ce ed b8		    LDDR 
+07d0			LAB_ram_07d0: 
+07d0 e1			    POP HL 
+07d1 e5			    PUSH HL 
+07d2 cd fd 06		    CALL console_erase_to_end_of_line 
+07d5 e1			    POP HL 
+07d6 18 bd		    JR LAB_ram_0795 
+07d8			 
+07d8			FUN_ram_07d8: 
+07d8 cd 22 07		    CALL set_hl_to_cursor_a_to_char_cleaned 
+07db cd 30 07		    CALL console_carriage_return 
+07de e5			    PUSH HL 
+07df eb			    EX DE,HL 
+07e0 21 80 3b		    LD HL,0x3b80 
+07e3 b7			    OR A 
+07e4 ed 52		    SBC HL,DE 
+07e6 44			    LD B,H 
+07e7 4d			    LD C,L 
+07e8 e1			    POP HL 
+07e9 e5			    PUSH HL 
+07ea 11 80 00		    LD DE,0x80 
+07ed 19			    ADD HL,DE 
+07ee d1			    POP DE 
+07ef 78			    LD A,B 
+07f0 b1			    OR C 
+07f1 c9			    RET 
+07f2			 
+07f2			console_write_string: 
+07f2 e3			    EX (SP),HL 
+07f3 7e			    LD A,(HL) 
+07f4 23			    INC HL 
+07f5 e3			    EX (SP),HL 
+07f6 b7			    OR A 
+07f7 c8			    RET Z 
+07f8 4f			    LD C,A 
+07f9 cd 1e 06		    CALL console_write_c 
+07fc 18 f4		    JR console_write_string 
+07fe			 
+07fe			filler: 
+07fe ff 00		    DB 0xff, 0x00 
+0800			 
+0800			 
 # End of file bios.s
 0800

@@ -15,13 +15,32 @@ io_04_serial_data:        EQU 0x04
 io_05_keyboard_data:      EQU 0x05
 io_06_serial_control:     EQU 0x06
 io_07_keyboard_control:   EQU 0x07
-DAT_io_0008:              EQU 0x08
+io_08_parallel_data:      EQU 0x08
 io_10_fdc_command_status: EQU 0x10
 io_11_fdc_track:          EQU 0x11
 io_12_fdc_sector:         EQU 0x12
 io_13_fdc_data:           EQU 0x13
 io_14_scroll_register:    EQU 0x14
 io_1c_system_bits:        EQU 0x1c
+
+system_bit_drive_a:          EQU 0
+system_bit_drive_b:          EQU 1
+system_bit_unused:           EQU 2 
+system_bit_centronicsReady:  EQU 3 
+system_bit_centronicsStrobe: EQU 4
+system_bit_double_density:   EQU 5
+system_bit_motors:           EQU 6
+system_bit_bank:             EQU 7
+
+system_bit_drive_a_mask:          EQU 0x01
+system_bit_drive_b_mask:          EQU 0x02
+system_bit_unused_mask:           EQU 0x04
+system_bit_centronicsReady_mask:  EQU 0x08
+system_bit_centronicsStrobe_mask: EQU 0x10
+system_bit_double_density_mask:   EQU 0x20
+system_bit_motors_mask:           EQU 0x40
+system_bit_bank_mask:             EQU 0x80
+
 
 address_vram:      EQU 0x3000
 sectors_per_track: EQU 40                        ; pysical sectors. CP/M sees only 10 bigger sectors
@@ -62,7 +81,7 @@ DAT_ram_fc18: EQU 0xfc18
 DAT_ram_fc19: EQU 0xfc19
 
 mem_fe16_active_disk:  EQU 0xfe16
-DAT_ram_fe17:          EQU 0xfe17
+DAT_ram_fe17:          EQU 0xfe17                ; Disk related flags?
 mem_fe18_active_track: EQU 0xfe18
 mem_fe19_track:        EQU 0xfe19
 
@@ -110,7 +129,7 @@ ORG	0h
     JP lpt_output
     JP serial_get_control
     JP console_write_c
-    JP wait_B
+    JP wait_B                                    ; wait time in B
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -466,15 +485,17 @@ LAB_ram_0356:
     RET NZ
     CALL fdc_ensure_ready
     CALL fdc_restore_and_mem
+    ; Read address in single density
     IN A,(io_1c_system_bits)
-    AND 0xdf
+    AND ~system_bit_double_density_mask          ; Disable double density 
     OR 0x0
     OUT (io_1c_system_bits),A
     CALL fdc_read_address
     JR Z,local_read_address_ok
+    ; Retry read address with double density
     IN A,(io_1c_system_bits)
-    AND 0xdf
-    OR 0x20
+    AND ~system_bit_double_density_mask 
+    OR system_bit_double_density_mask            ; Enable double density
     OUT (io_1c_system_bits),A
     CALL fdc_read_address
     RET NZ
@@ -563,54 +584,68 @@ fdc_ensure_ready:
     LD A,0xd0
     OUT (io_10_fdc_command_status),A
     CALL turn_on_motor
+
     LD A,(mem_fe16_active_disk)
     LD E,A
     IN A,(io_1c_system_bits)
-    AND 0xfc
+    AND ~(system_bit_drive_a_mask|system_bit_drive_b_mask) ; Clear drive select bits
     OR E
-    INC A
-    AND 0xdf
-    LD HL,0xfe17
+    INC A                                          ; disk A(0) to mask 0x1, disk B(1) to mask 0x2
+    AND ~system_bit_double_density_mask            ; Disable double density
+    LD HL,DAT_ram_fe17
     OR (HL)
     OUT (io_1c_system_bits),A
     POP BC
     POP DE
     POP HL
     RET
+
 turn_on_motor:
+    ; Is it already on?
     IN A,(io_1c_system_bits)
-    BIT 0x6,A
+    BIT system_bit_motors,A
+    ; Return if it is
     RET Z
-    RES 0x6,A
+    ; Turn on
+    RES system_bit_motors,A
     OUT (io_1c_system_bits),A
+    ; Wait for motor to get some speed
     LD B,0x32
     CALL wait_B
     RET
+
 turn_off_motor:
+    ; Turn off in any case
     IN A,(io_1c_system_bits)
-    SET 0x6,A
+    SET system_bit_motors,A
     OUT (io_1c_system_bits),A
     RET
+
 wait_B:
+    ; wait time in B
     LD DE,0x686
-wait_B_loop:
+wait_B_inner_loop:
     DEC DE
     LD A,D
     OR E
-    JP NZ,wait_B_loop
-    DJNZ wait_B
+    JP NZ,wait_B_inner_loop
+    DJNZ wait_B                                  ; Do wait_B again with B-1
     RET
+
 fdc_halt:
+    ; The fdc generates a NMI when it requires attention. The NMI handler
+    ; is just a RET that will stop the HALT and execute the next instruction.
     HALT
 wait_while_busy:
     IN A,(io_10_fdc_command_status)
     BIT 0x0,A
     JR NZ,wait_while_busy
     RET
+
 read_sector_yy:
     LD L,0x3
 LAB_ram_043b:
-    LD DE,0x40f
+    LD DE,0x040f
 LAB_ram_043e:
     PUSH HL
     PUSH DE
@@ -682,13 +717,13 @@ block_to_relocate_to_fecd:
 reloc_move_RAM:
     ; Hide the ROM
     IN A,(io_1c_system_bits)
-    RES 0x7,A
+    RES system_bit_bank,A
     OUT (io_1c_system_bits),A
     ; Copy the bytes
     LDIR
-    ; Shot the ROM
+    ; Show the ROM
     IN A,(io_1c_system_bits)
-    SET 0x7,A
+    SET system_bit_bank,A
     OUT (io_1c_system_bits),A
     RET
 reloc_read_in_DMA:
@@ -715,7 +750,7 @@ reloc_RW_internal:
     DI
     ; Hide the ROM
     IN A,(io_1c_system_bits)
-    RES 0x7,A
+    RES system_bit_bank,A
     OUT (io_1c_system_bits),A
     ; Setup RET as the handler of NMI
     ; as the ROM is paged out, there is no handler
@@ -768,7 +803,7 @@ read_sector_completed:
     LD (nmi_isr),A
     ; Restore the ROM
     IN A,(io_1c_system_bits)
-    SET 0x7,A
+    SET system_bit_bank,A
     OUT (io_1c_system_bits),A
     EI
     ; Wait for the disk access result code
@@ -852,7 +887,7 @@ keyboard_out:
     ; char in C. C=4 for the bell.
     IN A,(io_07_keyboard_control)
     AND 0x4
-    JR Z,keyboard_out                            ; Loop until the keyboard is ready
+    JR Z,keyboard_out                            ; Loop until a key is pressed
     LD A,C
     OUT (io_05_keyboard_data),A
     RET
@@ -861,7 +896,7 @@ translate_keyboard_in_a:
     LD HL,translate_keyboard_keys
     LD BC,translate_keyboard_size
     CPIR
-    RET NZ                                       ; Return the key not trasnlated
+    RET NZ                                       ; Return the key not translated
     ; key found, replace with the corresponding char
     LD DE,translate_keyboard_keys
     OR A
@@ -881,22 +916,27 @@ translate_keyboard_values:
     DB 0x8F, 0x90, 0x91
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; SERIAL AND PARALLEL
+; SERIAL
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 is_serial_byte_ready:
+    ; return 0 or FF in A
     IN A,(io_06_serial_control)
     AND 0x1
     JR force_0_or_ff
+
 get_byte_from_serial:
+    ; return char in A
     CALL is_serial_byte_ready
     JR Z,get_byte_from_serial
     IN A,(io_04_serial_data)
     RET
+
 serial_out:
+    ; char in C
     IN A,(io_06_serial_control)
     AND 0x4
-    JR Z,serial_out
+    JR Z,serial_out                              ; Loop until a byte is ready
     LD A,C
     OUT (io_04_serial_data),A
     RET
@@ -904,22 +944,32 @@ serial_get_control:
     IN A,(io_06_serial_control)
     AND 0x4
     JR force_0_or_ff
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; PARALLEL
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 lpt_status:
+    ; return 0 or FF in A
     IN A,(io_1c_system_bits)
-    BIT 0x3,A
+    BIT system_bit_centronicsReady,A
 force_0_or_ff:
     RET Z
     LD A,0xff
     RET
 lpt_output:
+    ; char in C
+    ; Loop until the printer is ready
     CALL lpt_status
     JR Z,lpt_output
+    ; Ouput the byte in C
     LD A,C
-    OUT (DAT_io_0008),A
+    OUT (io_08_parallel_data),A
+    ; Pulse the strobe signal
     IN A,(io_1c_system_bits)
-    SET 0x4,A
+    SET system_bit_centronicsStrobe,A
     OUT (io_1c_system_bits),A
-    RES 0x4,A
+    RES system_bit_centronicsStrobe,A
     OUT (io_1c_system_bits),A
     RET
 
