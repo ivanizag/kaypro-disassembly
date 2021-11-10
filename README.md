@@ -8,4 +8,4 @@ The ROM has this main sections:
 - keyboard, serial and parallel ports usage
 - formatted output to the screen
 
-The file bios.s can be assembled with z80adm to generate a binary identical to the initial ROM. See verify.sh
+The file bios.s can be assembled with z80asm to generate a binary identical to the initial ROM. See verify.sh
