@@ -12,6 +12,9 @@
 0000			; CONSTANTS 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; I/O Ports 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			io_04_serial_data:        EQU 0x04 
 0000			io_05_keyboard_data:      EQU 0x05 
 0000			io_06_serial_control:     EQU 0x06 
@@ -24,14 +27,18 @@
 0000			io_14_scroll_register:    EQU 0x14 
 0000			io_1c_system_bits:        EQU 0x1c 
 0000			 
-0000			system_bit_drive_a:          EQU 0 
-0000			system_bit_drive_b:          EQU 1 
-0000			system_bit_unused:           EQU 2  
-0000			system_bit_centronicsReady:  EQU 3  
-0000			system_bit_centronicsStrobe: EQU 4 
-0000			system_bit_double_density:   EQU 5 
-0000			system_bit_motors:           EQU 6 
-0000			system_bit_bank:             EQU 7 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; System bits 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			system_bit_drive_a:               EQU 0 
+0000			system_bit_drive_b:               EQU 1 
+0000			system_bit_unused:                EQU 2 
+0000			system_bit_centronicsReady:       EQU 3 
+0000			system_bit_centronicsStrobe:      EQU 4 
+0000			system_bit_double_density:        EQU 5 
+0000			system_bit_motors:                EQU 6 
+0000			system_bit_bank:                  EQU 7 
 0000			 
 0000			system_bit_drive_a_mask:          EQU 0x01 
 0000			system_bit_drive_b_mask:          EQU 0x02 
@@ -43,75 +50,101 @@
 0000			system_bit_bank_mask:             EQU 0x80 
 0000			 
 0000			 
-0000			address_vram:      EQU 0x3000 
-0000			address_vram_end:  EQU 0x3bff 
-0000			console_columns:   EQU 80 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; Console constants 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			address_vram:        EQU 0x3000 
+0000			console_lines:       EQU 24 
+0000			console_columns:     EQU 80 
+0000			console_line_length: EQU 0x80                    ; There are 80 cols, but 128 bytes reserved for each line 
+0000			console_line_mask:   EQU 0x7f 
 0000			 
+0000			address_vram_end:                EQU address_vram + console_lines * console_line_length -1 ; 0x3bff 
+0000			address_vram_start_of_last_line: EQU address_vram_end - console_line_length + 1            ; 0x3b80 
+0000			 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; Disk constants 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			sectors_per_track: EQU 40                        ; pysical sectors. CP/M sees only 10 bigger sectors 
 0000			sector_size:	   EQU 128                       ; physical sector size. Logical will be 512 for CP/M 
 0000			 
 0000			RET_opcode:	       EQU 0xC9                      ; RET, used to set the NMI_ISR when the ROM is disabled 
 0000			 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; The first boot sector has the info about 
 0000			; the rest of the boot sector loadind 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			first_sector_load_address:     EQU 0xfa00 
 0000			address_to_load_second_sector: EQU 0xfa02 
 0000			address_to_exec_boot:          EQU 0xfa04 
 0000			count_of_boot_sectors_needed:  EQU 0xfa06 
 0000			 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; Disk related variables 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			ram_fc00_disk_for_next_access:   EQU 0xfc00 
 0000			ram_fc01_track_for_next_access:  EQU 0xfc01 
 0000			ram_fc03_sector_for_next_access: EQU 0xfc03 
 0000			 
-0000			ram_fc04_disk_xx:   EQU 0xfc04 
-0000			ram_fc05_track_xx:  EQU 0xfc05 
-0000			ram_fc07_sector_xx: EQU 0xfc07 
+0000			ram_fc04_disk_xx:                EQU 0xfc04 
+0000			ram_fc05_track_xx:               EQU 0xfc05 
+0000			ram_fc07_sector_xx:              EQU 0xfc07 
 0000			 
-0000			DAT_ram_fc08: EQU 0xfc08 
-0000			DAT_ram_fc09: EQU 0xfc09 
-0000			DAT_ram_fc0a: EQU 0xfc0a 
-0000			DAT_ram_fc0b: EQU 0xfc0b 
-0000			DAT_ram_fc0c: EQU 0xfc0c 
-0000			DAT_ram_fc0d: EQU 0xfc0d 
-0000			DAT_ram_fc0f: EQU 0xfc0f 
-0000			DAT_ram_fc10: EQU 0xfc10 
-0000			DAT_ram_fc11: EQU 0xfc11 
-0000			DAT_ram_fc12: EQU 0xfc12 
-0000			DAT_ram_fc13: EQU 0xfc13 
-0000			ram_fc14_DMA_address: EQU 0xfc14 
-0000			DAT_ram_fc16: EQU 0xfc16 
-0000			DAT_ram_fc17: EQU 0xfc17 
-0000			DAT_ram_fc18: EQU 0xfc18 
-0000			DAT_ram_fc19: EQU 0xfc19 
+0000			DAT_ram_fc08:                    EQU 0xfc08 
+0000			DAT_ram_fc09:                    EQU 0xfc09 
+0000			DAT_ram_fc0a:                    EQU 0xfc0a 
+0000			DAT_ram_fc0b:                    EQU 0xfc0b 
+0000			DAT_ram_fc0c:                    EQU 0xfc0c 
+0000			DAT_ram_fc0d:                    EQU 0xfc0d 
+0000			DAT_ram_fc0f:                    EQU 0xfc0f 
+0000			DAT_ram_fc10:                    EQU 0xfc10 
+0000			DAT_ram_fc11:                    EQU 0xfc11 
+0000			DAT_ram_fc12:                    EQU 0xfc12 
+0000			DAT_ram_fc13:                    EQU 0xfc13 
+0000			ram_fc14_DMA_address:            EQU 0xfc14 
+0000			DAT_ram_fc16:                    EQU 0xfc16 
+0000			DAT_ram_fc17:                    EQU 0xfc17 
+0000			DAT_ram_fc18:                    EQU 0xfc18 
+0000			DAT_ram_fc19:                    EQU 0xfc19 
 0000			 
-0000			mem_fe16_active_disk:  EQU 0xfe16 
-0000			DAT_ram_fe17:          EQU 0xfe17                ; Disk related flags? 
-0000			mem_fe18_active_track: EQU 0xfe18 
-0000			mem_fe19_track:        EQU 0xfe19 
+0000			mem_fe16_active_disk:            EQU 0xfe16 
+0000			DAT_ram_fe17:                    EQU 0xfe17      ; Disk related flags? 
+0000			mem_fe18_active_track:           EQU 0xfe18 
+0000			mem_fe19_track:                  EQU 0xfe19 
 0000			 
-0000			console_esc_mode:      EQU 0xfe6c 
-0000			console_esc_mode_disabled: EQU 0                  ; No ESC pending 
-0000			console_esc_mode_enabled:  EQU 1                  ; Next char is the ESC command 
-0000			console_esc_mode_equal:    EQU 2                  ; Next char is the first arg of the = command 
 0000			 
-0000			DAT_ram_fe6d:    EQU 0xfe6d 
-0000			console_cursor_position: EQU 0xfe6e 
-0000			SUB_ram_fef4:    EQU 0xfef4 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; Console related variables 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			console_esc_mode:            EQU 0xfe6c 
+0000			console_esc_mode_clear:      EQU 0               ; No ESC pending 
+0000			console_esc_mode_enabled:    EQU 1               ; Next char is the ESC command 
+0000			console_esc_mode_arg_1:      EQU 2               ; Next char is the first arg of the = command 
+0000			console_esc_mode_arg_2:      EQU 3               ; Next char is the second arg of the = command 
+0000			console_esc_equal_first_arg:   EQU 0xfe6d          ; First arg of the esc= command 
+0000			console_cursor_position:     EQU 0xfe6e          ; 2 bytes 
 0000			 
-0000			; On greek mode, the char is moved to the area if control chars that are printed as greek letters 
-0000			console_alphabet_mask:    EQU 0xfe70 
+0000			; On greek mode, the char is converted to a control char that is printed as a greek letter 
+0000			console_alphabet_mask:       EQU 0xfe70 
 0000			console_alphabet_ascii_mask: EQU 0x7f 
 0000			console_alphabet_greek_mask: EQU 0x1f 
 0000			 
-0000			LAB_ram_feed:    EQU 0xfeed 
 0000			 
-0000			; Some code is relocated to upper memory 
-0000			disk_params_destination: EQU 0xfe71 
-0000			relocation_destination:  EQU 0xfecd 
-0000			relocation_offset:       EQU 0xfecd - 0x04a8 ; relocation_destination - block_to_relocate_to_fecd 
-0000			read_in_DMA_relocated:   EQU 0xfedc          ; reloc_read_in_DMA + relocation_offset 
-0000			move_RAM_relocated:      EQU 0xfecd          ; reloc_move_RAM + relocation_offset 
-0000			read_to_upper_relocated: EQU 0xfee3          ; reloc_read_to_upper + relocation_offset 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; Entry points of code relocated to upper RAM 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			disk_params_destination:    EQU 0xfe71 
+0000			relocation_destination:     EQU 0xfecd 
+0000			relocation_offset:          EQU 0xfecd - 0x04a8  ; relocation_destination - block_to_relocate_to_fecd 
+0000			read_in_DMA_relocated:      EQU 0xfedc           ; reloc_read_in_DMA + relocation_offset 
+0000			move_RAM_relocated:         EQU 0xfecd           ; reloc_move_RAM + relocation_offset 
+0000			read_to_upper_relocated:    EQU 0xfee3           ; reloc_read_to_upper + relocation_offset 
+0000			write_from_upper_relocated: EQU 0xfef4           ; reloc_write_from_upper + relocation_offset 
+0000			write_to_DMA_relocated:     EQU 0xfeed           ; reloc_write_to_DMA + relocation_offset 
+0000			 
 0000			 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; BIOS ENTRY POINTS 
@@ -132,9 +165,9 @@
 0021 c3 e4 03		    JP sector_translation 
 0024 c3 0f 04		    JP turn_on_motor 
 0027 c3 1e 04		    JP turn_off_motor 
-002a c3 75 05		    JP is_key_pressed                            ; return 0 or FF in A 
-002d c3 7d 05		    JP get_key                                   ; return char in A 
-0030 c3 88 05		    JP keyboard_out                              ; char in C, used for the bell 
+002a c3 75 05		    JP is_key_pressed 
+002d c3 7d 05		    JP get_key 
+0030 c3 88 05		    JP keyboard_out 
 0033 c3 cc 05		    JP is_serial_byte_ready 
 0036 c3 d2 05		    JP get_byte_from_serial 
 0039 c3 da 05		    JP serial_out 
@@ -142,7 +175,7 @@
 003f c3 f2 05		    JP lpt_output 
 0042 c3 e4 05		    JP serial_get_control 
 0045 c3 1e 06		    JP console_write_c 
-0048 c3 25 04		    JP wait_B                                    ; wait time in B 
+0048 c3 25 04		    JP wait_b 
 004b			 
 004b			 
 004b			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
@@ -153,7 +186,7 @@
 004b f3			    DI 
 004c 31 ff ff		    LD SP, 0xffff 
 004f 06 0a		    LD B, 0xa 
-0051 cd 25 04		    CALL wait_B 
+0051 cd 25 04		    CALL wait_b 
 0054 cd 68 05		    CALL init_ports 
 0057 cd 05 06		    CALL init_screen 
 005a cd 86 01		    CALL init_upper_RAM 
@@ -171,7 +204,7 @@
 0081 1b .. 2d 34	    DB 1Bh,"=", 0x20 + 0xd, 0x20 + 0x14          ; ESC code, move to line 13, column 20 
 0085 ..			    DB " Please place your diskette into Drive A" 
 00ad 08			    DB 0x8                                       ; Cursor 
-00ae 00			    DB 0  									     ; End string 
+00ae 00			    DB 0                                         ; End NUL terminated string 
 00af			 
 00af 0e 00		    LD C,0x0 
 00b1 cd b4 01		    CALL set_disk_for_next_access 
@@ -222,13 +255,13 @@
 010d .. 00		    DB "\n\r\n\r\aI cannot read your diskette.",0 
 012f cd 1e 04		    CALL turn_off_motor 
 0132			wait_forever: 
-0132 18 fe		    JR wait_forever                              ; Lock the CPU	 
+0132 18 fe		    JR wait_forever                              ; Lock the CPU 
 0134			 
 0134			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0134			; COPY CODE AND DATA TO UPPER RAM 
 0134			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0134			 
-0134			disk_params:                                     ; This data will be copied to 0xfe71  
+0134			disk_params:                                     ; This data will be copied to 0xfe71 
 0134			init_data_drive_0: 
 0134 00 00 00 00 00 00 00 00	    DB 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 
 013c 73 ff a2 fe 1a fe 2a fe	    DB 0x73, 0xFF, 0xA2, 0xFE, 0x1A, 0xFE, 0x2A, 0xFE 
@@ -251,7 +284,7 @@
 018c 01 87 00		    LD BC,0x87 
 018f ed b0		    LDIR 
 0191			 
-0191 21 34 01		    LD HL, disk_params                     
+0191 21 34 01		    LD HL, disk_params 
 0194 11 71 fe		    LD DE, disk_params_destination 
 0197 01 52 00		    LD BC,0x52 
 019a ed b0		    LDIR 
@@ -317,7 +350,7 @@
 0207			write_sector: 
 0207 3a 17 fe		    LD A,(DAT_ram_fe17) 
 020a b7			    OR A 
-020b c2 ed fe		    JP NZ,LAB_ram_feed 
+020b c2 ed fe		    JP NZ,write_to_DMA_relocated 
 020e af			    XOR A 
 020f 32 12 fc		    LD (DAT_ram_fc12),A 
 0212 79			    LD A,C 
@@ -500,14 +533,14 @@
 0361 cd d8 01		    CALL fdc_restore_and_mem 
 0364			    ; Read address in single density 
 0364 db 1c		    IN A,(io_1c_system_bits) 
-0366 e6 df		    AND ~system_bit_double_density_mask          ; Disable double density  
+0366 e6 df		    AND ~system_bit_double_density_mask          ; Disable double density 
 0368 f6 00		    OR 0x0 
 036a d3 1c		    OUT (io_1c_system_bits),A 
 036c cd c1 03		    CALL fdc_read_address 
 036f 28 0e		    JR Z,local_read_address_ok 
 0371			    ; Retry read address with double density 
 0371 db 1c		    IN A,(io_1c_system_bits) 
-0373 e6 df		    AND ~system_bit_double_density_mask  
+0373 e6 df		    AND ~system_bit_double_density_mask 
 0375 f6 20		    OR system_bit_double_density_mask            ; Enable double density 
 0377 d3 1c		    OUT (io_1c_system_bits),A 
 0379 cd c1 03		    CALL fdc_read_address 
@@ -624,7 +657,7 @@
 0416 d3 1c		    OUT (io_1c_system_bits),A 
 0418			    ; Wait for motor to get some speed 
 0418 06 32		    LD B,0x32 
-041a cd 25 04		    CALL wait_B 
+041a cd 25 04		    CALL wait_b 
 041d c9			    RET 
 041e			 
 041e			turn_off_motor: 
@@ -634,15 +667,15 @@
 0422 d3 1c		    OUT (io_1c_system_bits),A 
 0424 c9			    RET 
 0425			 
-0425			wait_B: 
+0425			wait_b: 
 0425			    ; wait time in B 
 0425 11 86 06		    LD DE,0x686 
-0428			wait_B_inner_loop: 
+0428			wait_b_inner_loop: 
 0428 1b			    DEC DE 
 0429 7a			    LD A,D 
 042a b3			    OR E 
-042b c2 28 04		    JP NZ,wait_B_inner_loop 
-042e 10 f5		    DJNZ wait_B                                  ; Do wait_B again with B-1 
+042b c2 28 04		    JP NZ,wait_b_inner_loop 
+042e 10 f5		    DJNZ wait_b                                  ; Do wait_b again with B-1 
 0430 c9			    RET 
 0431			 
 0431			fdc_halt: 
@@ -663,7 +696,7 @@
 043e e5			    PUSH HL 
 043f d5			    PUSH DE 
 0440 cd 92 04		    CALL go_to_track_sector 
-0443 cd f4 fe		    CALL SUB_ram_fef4 
+0443 cd f4 fe		    CALL write_from_upper_relocated 
 0446 d1			    POP DE 
 0447 e1			    POP HL 
 0448 28 0d		    JR Z,LAB_ram_0457 
@@ -872,7 +905,8 @@
 056d 4e			    LD C,(HL) 
 056e 23			    INC HL 
 056f 7e			    LD A,(HL) 
-0570 ed 79		    OUT (C),A                                    ; An out for each pair of bytes in init_ports_data 
+0570			    ; An out for each pair of bytes in init_ports_data 
+0570 ed 79		    OUT (C),A 
 0572 10 f8		    DJNZ init_port_loop 
 0574 c9			    RET 
 0575			 
@@ -900,7 +934,8 @@
 0588			    ; char in C. C=4 for the bell. 
 0588 db 07		    IN A,(io_07_keyboard_control) 
 058a e6 04		    AND 0x4 
-058c 28 fa		    JR Z,keyboard_out                            ; Loop until a key is pressed 
+058c			     ; Loop until a key is pressed 
+058c 28 fa		    JR Z,keyboard_out 
 058e 79			    LD A,C 
 058f d3 05		    OUT (io_05_keyboard_data),A 
 0591 c9			    RET 
@@ -909,8 +944,9 @@
 0592 21 a7 05		    LD HL,translate_keyboard_keys 
 0595 01 13 00		    LD BC,translate_keyboard_size 
 0598 ed b1		    CPIR 
-059a c0			    RET NZ                                       ; Return the key not translated 
-059b			    ; key found, replace with the corresponding char 
+059a			    ; Key not found, return the key not translated 
+059a c0			    RET NZ 
+059b			    ; Key found, replace with the corresponding char 
 059b 11 a7 05		    LD DE,translate_keyboard_keys 
 059e b7			    OR A 
 059f ed 52		    SBC HL,DE 
@@ -922,7 +958,7 @@
 05a7			translate_keyboard_keys: 
 05a7 f1 f2 f3 f4 b1 c0 c1 c2	    DB 0xF1, 0xF2, 0xF3, 0xF4, 0xB1, 0xC0, 0xC1, 0xC2 
 05af d0 d1 d2 e1 e2 e3 e4 d3	    DB 0xD0, 0xD1, 0xD2, 0xE1, 0xE2, 0xE3, 0xE4, 0xD3 
-05b7 c3 b2		    DB 0xC3, 0xB2                                ; The 0xff from the values table is used as the last key 
+05b7 c3 b2		    DB 0xC3, 0xB2 ; The 0xff from the values table is used as the last key 
 05b9			translate_keyboard_values: 
 05b9 ff 80 81 82 83 84 85 86	    DB 0xFF, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86 
 05c1 87 88 89 8a 8b 8c 8d 8e	    DB 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E 
@@ -949,7 +985,8 @@
 05da			    ; char in C 
 05da db 06		    IN A,(io_06_serial_control) 
 05dc e6 04		    AND 0x4 
-05de 28 fa		    JR Z,serial_out                              ; Loop until a byte is ready 
+05de			    ; Loop until a byte is ready 
+05de 28 fa		    JR Z,serial_out 
 05e0 79			    LD A,C 
 05e1 d3 04		    OUT (io_04_serial_data),A 
 05e3 c9			    RET 
@@ -991,9 +1028,9 @@
 0605			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0605			 
 0605			init_screen: 
-0605			    ; ?? 
+0605			    ; Clear stored ESC command argument 
 0605 3e 20		    LD A, ' ' 
-0607 32 6d fe		    LD (DAT_ram_fe6d),A 
+0607 32 6d fe		    LD (console_esc_equal_first_arg),A 
 060a			    ; clear screen and put the cursor at the top left 
 060a cd c4 06		    CALL console_clear_screen 
 060d 22 6e fe		    LD (console_cursor_position),HL 
@@ -1012,13 +1049,13 @@
 061e			    ; char in C 
 061e			    ; Are we processing an escape sequence? 
 061e 3a 6c fe		    LD A,(console_esc_mode) 
-0621 b7			    OR A 
+0621 b7			    OR A ; Clear carry 
 0622 c2 3b 07		    JP NZ,process_esc_command 
 0625			    ; Is it a BELL? 
-0625 3e 07		    LD A,0x7                                                                   ; ^G, BEL 
+0625 3e 07		    LD A,0x7 ; ^G BELL 
 0627 b9			    CP C 
 0628 20 05		    JR NZ,console_write_c_cont 
-062a			    ; BELL beeps sending a 4 to the keyboard 
+062a			    ; BELL sends a 4 to the keyboard to beep 
 062a 0e 04		    LD C,0x4 
 062c c3 88 05		    JP keyboard_out 
 062f			console_write_c_cont: 
@@ -1068,72 +1105,92 @@
 0675 18 28		    JR console_line_feed 
 0677			 
 0677			console_line_feed_cont: 
+0677			    ; Let's check if the cursor is past the end of the screen 
 0677 11 ff 3b		    LD DE, address_vram_end 
 067a 7a			    LD A,D 
 067b bc			    CP H 
-067c 38 04		    JR C,LAB_ram_0682 
+067c 38 04		    JR C,console_line_feed_scroll 
 067e c0			    RET NZ 
 067f 7b			    LD A,E 
 0680 bd			    CP L 
 0681 d0			    RET NC 
-0682			LAB_ram_0682: 
-0682 06 17		    LD B,0x17 
-0684 21 80 30		    LD HL,0x3080 
-0687 11 00 30		    LD DE,address_vram 
-068a			LAB_ram_068a: 
+0682			 
+0682			console_line_feed_scroll: 
+0682			    ; We are at the end of the screen, scroll the screen 
+0682			    ; Move all lines except the first up 
+0682 06 17		    LD B, console_lines - 1 
+0684			    ; Copy 80 chars from each line to the prev one 
+0684			    ; Starting by the second line 
+0684 21 80 30		    LD HL, address_vram + console_line_length 
+0687 11 00 30		    LD DE, address_vram 
+068a			console_line_feed_scroll_loop: 
 068a c5			    PUSH BC 
-068b 01 50 00		    LD BC,0x50 
+068b			    ; Copy 80 chars 
+068b 01 50 00		    LD BC, console_columns 
 068e ed b0		    LDIR 
-0690 01 30 00		    LD BC,0x30 
+0690			    ; Skip the 128 - 80 chars not used 
+0690 01 30 00		    LD BC,console_line_length - console_columns 
 0693 09			    ADD HL,BC 
 0694 eb			    EX DE,HL 
 0695 09			    ADD HL,BC 
 0696 eb			    EX DE,HL 
 0697 c1			    POP BC 
-0698 10 f0		    DJNZ LAB_ram_068a 
-069a 21 80 3b		    LD HL,0x3b80 
+0698			    ; Repeat for each line 
+0698 10 f0		    DJNZ console_line_feed_scroll_loop 
+069a			    ; Place the cursor at the bottom left 
+069a 21 80 3b		    LD HL, address_vram_start_of_last_line 
 069d 18 5e		    JR console_erase_to_end_of_line 
 069f			 
 069f			console_line_feed: 
-069f 11 80 00		    LD DE,0x80 
+069f			    ; Advance the cursor to the next line 
+069f 11 80 00		    LD DE, console_line_length 
 06a2 19			    ADD HL,DE 
+06a3			    ; Scroll up if needed 
 06a3 18 d2		    JR console_line_feed_cont 
 06a5			 
 06a5			console_backspace: 
 06a5 7d			    LD A,L 
-06a6 e6 7f		    AND 0x7f 
+06a6 e6 7f		    AND console_line_mask 
+06a8			    ; Ignore if we are already at the beginning of the line 
 06a8 c8			    RET Z 
+06a9			    ; Move the cursor to the previous char 
 06a9 2b			    DEC HL 
 06aa c9			    RET 
 06ab			 
 06ab			console_right: 
 06ab 7d			    LD A,L 
-06ac e6 7f		    AND 0x7f 
-06ae fe 4f		    CP 0x4f 
+06ac e6 7f		    AND console_line_mask 
+06ae			    ; Ignore if we are already at the end of the line 
+06ae fe 4f		    CP console_columns-1 
 06b0 d0			    RET NC 
+06b1			    ; Move the cursor to the next char 
 06b1 23			    INC HL 
 06b2 c9			    RET 
 06b3			 
 06b3			console_up: 
 06b3 e5			    PUSH HL 
-06b4 11 80 ff		    LD DE,0xff80 
+06b4			    ; Move one line up 
+06b4 11 80 ff		    LD DE, -console_line_length 
 06b7 19			    ADD HL,DE 
 06b8 e5			    PUSH HL 
-06b9 b7			    OR A 
+06b9			    ; Are we moved too far up? 
+06b9 b7			    OR A ; Clear carry 
 06ba 11 00 30		    LD DE,address_vram 
 06bd ed 52		    SBC HL,DE 
-06bf e1			    POP HL 
-06c0 d1			    POP DE 
+06bf e1			    POP HL ; Updated position 
+06c0 d1			    POP DE ; Original position 
+06c1			    ; No, we re ok 
 06c1 d0			    RET NC 
+06c2			    ; Yes, restore the original position 
 06c2 eb			    EX DE,HL 
 06c3 c9			    RET 
 06c4			 
 06c4			console_clear_screen: 
 06c4			    ; Put a space at the beginning of the screen 
 06c4			    ; and for the rest of the screen, copy the previous char (a space) 
-06c4 21 00 30		    LD HL,address_vram 
-06c7 11 01 30		    LD DE,address_vram+1 
-06ca 01 ff 0b		    LD BC,0xbff 
+06c4 21 00 30		    LD HL, address_vram 
+06c7 11 01 30		    LD DE, address_vram + 1 
+06ca 01 ff 0b		    LD BC, console_lines * console_line_length - 1 
 06cd 36 20		    LD (HL), ' ' 
 06cf ed b0		    LDIR 
 06d1			    ; Set the cursor to the beginning of the screen 
@@ -1148,55 +1205,71 @@
 06d9			console_erase_to_end_of_screen: 
 06d9 e5			    PUSH HL 
 06da cd fd 06		    CALL console_erase_to_end_of_line 
-06dd 11 80 00		    LD DE,0x80 
+06dd 11 80 00		    LD DE, console_line_length 
+06e0			    ; Move cursor to the beggining of the current line 
 06e0 7d			    LD A,L 
-06e1 e6 80		    AND 0x80 
+06e1 e6 80		    AND console_line_length 
 06e3 6f			    LD L,A 
+06e4			    ; Move cursor the the next line 
 06e4 19			    ADD HL,DE 
-06e5 3e 3c		    LD A,0x3c 
+06e5			    ; Did we move past the end the the screen? 
+06e5 3e 3c		    LD A,0x3c ; MSB byte of the position past the end of the screen 
 06e7 bc			    CP H 
-06e8 28 11		    JR Z,LAB_ram_06fb 
+06e8			    ; If yes, restore cursor and return 
+06e8 28 11		    JR Z,console_restore_cursor_position 
+06ea			    ; Write spaces until the end of the screen 
+06ea			    ; Set in CB the count of spaces to write 
 06ea 5d			    LD E,L 
 06eb 54			    LD D,H 
-06ec b7			    OR A 
+06ec b7			    OR A ; Clear carry 
 06ed 21 ff 3b		    LD HL, address_vram_end 
 06f0 ed 52		    SBC HL,DE 
 06f2 4d			    LD C,L 
 06f3 44			    LD B,H 
+06f4			    ; Set DE as the next char 
 06f4 62			    LD H,D 
 06f5 6b			    LD L,E 
 06f6 13			    INC DE 
+06f7			    ; Fill with spaces copying the previous char until the end of the screen 
 06f7 36 20		    LD (HL), ' ' 
 06f9 ed b0		    LDIR 
-06fb			LAB_ram_06fb: 
+06fb			console_restore_cursor_position: 
 06fb e1			    POP HL 
 06fc c9			    RET 
 06fd			 
 06fd			console_erase_to_end_of_line: 
 06fd 7d			    LD A,L 
-06fe e6 7f		    AND 0x7f 
-0700 fe 4f		    CP 0x4f 
+06fe e6 7f		    AND console_line_mask 
+0700			    ; Are we at the last position of the line? 
+0700 fe 4f		    CP console_columns-1 
+0702			    ; No 
 0702 38 03		    JR C,console_erase_to_end_of_line_cont 
+0704			    ; Yes, write a space and return 
 0704 36 20		    LD (HL), ' ' 
 0706 c9			    RET 
 0707			console_erase_to_end_of_line_cont: 
 0707 e5			    PUSH HL 
 0708 e5			    PUSH HL 
+0709			    ; Move to the start of the line 
 0709 7d			    LD A,L 
-070a e6 80		    AND 0x80 
+070a e6 80		    AND console_line_length 
 070c 6f			    LD L,A 
-070d 11 4f 00		    LD DE,0x004f 
+070d			    ; Move to the end of the line 
+070d 11 4f 00		    LD DE, console_columns - 1 
 0710 19			    ADD HL,DE 
-0711 d1			    POP DE 
+0711 d1			    POP DE ; Original position 
 0712 d5			    PUSH DE 
-0713 b7			    OR A 
+0713			    ; Set CB to the count of spaces to write from cursor to the end of the line 
+0713 b7			    OR A ; Clear carry 
 0714 ed 52		    SBC HL,DE 
 0716 4d			    LD C,L 
 0717 44			    LD B,H 
+0718			    ; Set DE as the next char 
 0718 e1			    POP HL 
 0719 5d			    LD E,L 
 071a 54			    LD D,H 
 071b 13			    INC DE 
+071c			    ; Fill with spaces copying the previous char until the end of the line 
 071c 36 20		    LD (HL), ' ' 
 071e ed b0		    LDIR 
 0720 e1			    POP HL 
@@ -1206,12 +1279,14 @@
 0722			    ; Get the cursor position 
 0722 2a 6e fe		    LD HL,(console_cursor_position) 
 0725 7e			    LD A,(HL) 
-0726			    ; If the char is a blinking '_' we put back a space 
+0726			    ; Is the char at the cursor a blinking '_' 
 0726 fe df		    CP '_' + 0x80 
 0728 3e 20		    LD A, ' ' 
-072a 20 01		    JR NZ,LAB_ram_072d 
+072a			    ; No, continue 
+072a 20 01		    JR NZ,remove_blink_and_get_cursor_position_cont 
+072c			    ; Yes, put back a space 
 072c 77			    LD (HL),A 
-072d			LAB_ram_072d: 
+072d			remove_blink_and_get_cursor_position_cont: 
 072d			    ; Remove the blink bit 
 072d cb be		    RES 0x7,(HL) 
 072f c9			    RET 
@@ -1219,7 +1294,7 @@
 0730			console_carriage_return: 
 0730			    ; Set column to 0 by clearing the 7 LS bits on the cursor position 
 0730 7d			    LD A,L 
-0731 e6 80		    AND 0x80 
+0731 e6 80		    AND console_line_length 
 0733 6f			    LD L,A 
 0734 c9			    RET 
 0735			 
@@ -1230,15 +1305,19 @@
 073a c9			    RET 
 073b			 
 073b			process_esc_command: 
+073b			    ; A has the esc mode 
+073b			    ; C has the char to process 
 073b			    ; Push the location of a RET on the stack. A RET will be another RET? 
 073b 21 a2 07		    LD HL,0x07a2 
 073e e5			    PUSH HL 
-073f			    ; disable esc mode 
+073f			    ; Reset ESC mode 
 073f 21 6c fe		    LD HL,console_esc_mode 
-0742 36 00		    LD (HL), console_esc_mode_disabled 
-0744			    ; 
-0744 fe 01		    CP 0x1 
-0746 20 19		    JR NZ,LAB_ram_0761 
+0742 36 00		    LD (HL), console_esc_mode_clear 
+0744			    ; Are we in a n ESC mode past ebaled? 
+0744 fe 01		    CP console_esc_mode_enabled 
+0746			    ; Yes, process esc argument 
+0746 20 19		    JR NZ,process_esc_arg_1 
+0748			    ; No, process the command 
 0748			    ; Load the char in A with the upper bit cleared (no blink) 
 0748 79			    LD A,C 
 0749 cb bf		    RES 0x7,A 
@@ -1247,54 +1326,64 @@
 074f fe 41		    CP 'A' 
 0751 28 56		    JR Z,esc_set_ascii_mode 
 0753 fe 52		    CP 'R' 
-0755 28 58		    JR Z,LAB_ram_07af 
+0755 28 58		    JR Z,esc_line_delete 
 0757 fe 45		    CP 'E' 
-0759 28 66		    JR Z,LAB_ram_07c1 
+0759 28 66		    JR Z,esc_line_insert 
 075b fe 3d		    CP '=' 
-075d			    ;  Not an ESC command, we ignore the char and return 
+075d			    ;  Not a known ESC command, we ignore the char and return 
 075d c0			    RET NZ 
-075e			    ; Command is '=', we set that mode  
-075e 36 02		    LD (HL),console_esc_mode_equal 
+075e			    ; Command is '=', we set that mode 
+075e 36 02		    LD (HL),console_esc_mode_arg_1 
 0760 c9			    RET 
 0761			 
-0761			LAB_ram_0761: 
-0761 fe 02		    CP 0x2 
-0763 20 07		    JR NZ,LAB_ram_076c 
+0761			process_esc_arg_1: 
+0761			    ; Are we in an ESC mode past arg_1 
+0761 fe 02		    CP console_esc_mode_arg_1 
+0763			    ; Yes 
+0763 20 07		    JR NZ,process_esc_arg_2 
+0765			    ; No, store the first argmument and return 
 0765 79			    LD A,C 
-0766 32 6d fe		    LD (DAT_ram_fe6d),A 
-0769 36 03		    LD (HL),0x3 
+0766 32 6d fe		    LD (console_esc_equal_first_arg),A 
+0769 36 03		    LD (HL),console_esc_mode_arg_2 
 076b c9			    RET 
-076c			LAB_ram_076c: 
-076c fe 03		    CP 0x3 
+076c			 
+076c			process_esc_arg_2: 
+076c			    ; Are we in an ESC mode past arg_2 
+076c fe 03		    CP console_esc_mode_arg_2 
+076e			    ; Yes, just return 
 076e c0			    RET NZ 
 076f cd 22 07		    CALL remove_blink_and_get_cursor_position 
 0772 e1			    POP HL 
+0773			    ; Put the cursor at the top right corner 
 0773 21 00 30		    LD HL,address_vram 
+0776			    ; Second arg is column + 0x20 
 0776 79			    LD A,C 
 0777 d6 20		    SUB 0x20 
-0779			 
-0779			LAB_ram_0779: 
-0779 d6 50		    SUB 0x50 
-077b 30 fc		    JR NC,LAB_ram_0779 
-077d c6 50		    ADD A,0x50 
+0779			    ; Get the modulo 80 
+0779			esc_arg_2_mod_80_loop: 
+0779 d6 50		    SUB console_columns 
+077b 30 fc		    JR NC,esc_arg_2_mod_80_loop 
+077d c6 50		    ADD A,console_columns 
+077f			    ; Advance to te arg_2 column 
 077f 6f			    LD L,A 
-0780 3a 6d fe		    LD A,(DAT_ram_fe6d) 
+0780			    ; First arg is row + 0x20 
+0780 3a 6d fe		    LD A,(console_esc_equal_first_arg) 
 0783 d6 20		    SUB 0x20 
-0785			 
-0785			LAB_ram_0785: 
-0785 d6 18		    SUB 0x18 
-0787 30 fc		    JR NC,LAB_ram_0785 
-0789 c6 18		    ADD A,0x18 
-078b 11 80 00		    LD DE,0x80 
-078e			 
-078e			LAB_ram_078e: 
+0785			    ; Get the modulo 24 
+0785			esc_arg_2_mod_24_loop: 
+0785 d6 18		    SUB console_lines 
+0787 30 fc		    JR NC,esc_arg_2_mod_24_loop 
+0789 c6 18		    ADD A,console_lines 
+078b			    ; Advance to the arg_1 row by advancing a line per row 
+078b 11 80 00		    LD DE,console_line_length 
+078e			move_down_loop: 
 078e ca 95 07		    JP Z,console_write_end 
 0791 19			    ADD HL,DE 
 0792 3d			    DEC A 
-0793 18 f9		    JR LAB_ram_078e 
+0793 18 f9		    JR move_down_loop 
 0795			 
 0795			console_write_end: 
-0795			    ; Finish the console_write and enable blink at the cursos position 
+0795			    ; Finish the console_write and enable blink at the cursor position 
 0795			    ; HL has the cursor position 
 0795			    ; Get the char under the cursos 
 0795 7e			    LD A,(HL) 
@@ -1311,59 +1400,80 @@
 07a2 c9			    RET 
 07a3			 
 07a3			esc_set_greek_mode: 
+07a3			    ; Store the mask for chars to write 
+07a3			    ; For greek chars, we map to 0 to 0x1f 
 07a3 3e 1f		    LD A,console_alphabet_greek_mask 
 07a5 32 70 fe		    LD (console_alphabet_mask),A 
 07a8 c9			    RET 
 07a9			 
 07a9			esc_set_ascii_mode: 
+07a9			    ; Store the mask for chars to write 
+07a9			    ; For ASCII, we just remove the blink bit 
 07a9 3e 7f		    LD A,console_alphabet_ascii_mask 
 07ab 32 70 fe		    LD (console_alphabet_mask),A 
 07ae c9			    RET 
 07af			 
-07af			LAB_ram_07af: 
+07af			esc_line_delete: 
 07af e1			    POP HL 
-07b0 cd d8 07		    CALL FUN_ram_07d8 
+07b0			    ; Prepare HL, DE, BC and the Z flag 
+07b0 cd d8 07		    CALL esc_line_insert_or_delete_prepare 
 07b3 d5			    PUSH DE 
-07b4 28 02		    JR Z,LAB_ram_07b8 
+07b4			    ; Skip copy if there is nothing to copy 
+07b4 28 02		    JR Z,esc_line_delete_end 
 07b6 ed b0		    LDIR 
-07b8			LAB_ram_07b8: 
-07b8 21 80 3b		    LD HL,0x3b80 
+07b8			esc_line_delete_end: 
+07b8			    ; Delete the last line, it is always empty after a line delete 
+07b8 21 80 3b		    LD HL, address_vram_start_of_last_line 
 07bb cd fd 06		    CALL console_erase_to_end_of_line 
+07be			    ; Set the cursor to it's original position 
 07be e1			    POP HL 
+07bf			    ; Done 
 07bf 18 d4		    JR console_write_end 
 07c1			 
-07c1			LAB_ram_07c1: 
+07c1			esc_line_insert: 
 07c1 e1			    POP HL 
-07c2 cd d8 07		    CALL FUN_ram_07d8 
+07c2			    ; Prepare HL, DE, BC and the Z flag 
+07c2 cd d8 07		    CALL esc_line_insert_or_delete_prepare 
 07c5 d5			    PUSH DE 
-07c6 28 08		    JR Z,LAB_ram_07d0 
+07c6			    ; Skip copy if there is nothing to copy 
+07c6 28 08		    JR Z,esc_line_insert_end 
+07c8			    ; Copy lines down up to the cursor line 
 07c8 11 ff 3b		    LD DE, address_vram_end 
-07cb 21 7f 3b		    LD HL,0x3b7f 
+07cb 21 7f 3b		    LD HL, address_vram_start_of_last_line - 1 
 07ce ed b8		    LDDR 
-07d0			LAB_ram_07d0: 
+07d0			esc_line_insert_end: 
+07d0			    ; Delete the line as we insert a blank line 
 07d0 e1			    POP HL 
 07d1 e5			    PUSH HL 
 07d2 cd fd 06		    CALL console_erase_to_end_of_line 
+07d5			    ; Set the cursor to the start of the line 
 07d5 e1			    POP HL 
+07d6			    ; Done 
 07d6 18 bd		    JR console_write_end 
 07d8			 
-07d8			FUN_ram_07d8: 
+07d8			esc_line_insert_or_delete_prepare: 
 07d8 cd 22 07		    CALL remove_blink_and_get_cursor_position 
 07db cd 30 07		    CALL console_carriage_return 
 07de e5			    PUSH HL 
 07df eb			    EX DE,HL 
-07e0 21 80 3b		    LD HL,0x3b80 
-07e3 b7			    OR A 
+07e0			    ; Position of the bottom left 
+07e0 21 80 3b		    LD HL, address_vram_start_of_last_line 
+07e3			    ; Set BC to the count of bytes until the end of the screen minus one line 
+07e3 b7			    OR A ; Clear carry 
 07e4 ed 52		    SBC HL,DE 
 07e6 44			    LD B,H 
 07e7 4d			    LD C,L 
+07e8			    ; Set HL to the start of the next line 
 07e8 e1			    POP HL 
 07e9 e5			    PUSH HL 
-07ea 11 80 00		    LD DE,0x80 
+07ea 11 80 00		    LD DE,console_line_length 
 07ed 19			    ADD HL,DE 
+07ee			    ; Set DE to the start of the current line 
 07ee d1			    POP DE 
+07ef			    ; Set Z flag if BC is zero. To be used later. 
 07ef 78			    LD A,B 
 07f0 b1			    OR C 
+07f1			    ; Back to insert or delete line 
 07f1 c9			    RET 
 07f2			 
 07f2			console_write_string: 
@@ -1385,7 +1495,6 @@
 07fe			 
 07fe			filler: 
 07fe ff 00		    DB 0xff, 0x00 
-0800			 
 0800			 
 # End of file bios.s
 0800
