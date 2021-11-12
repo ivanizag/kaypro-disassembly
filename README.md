@@ -1,7 +1,7 @@
 # Kaypro ROM disassembled and commented
 
 See [81-149c/bios.s](81-149c/bios.s) disassembly of the ROM 81-149c for the Kaypro II.
-The ROM has this main sections:
+The ROM has these main sections:
 - entry points
 - initialization and loading the OS from disk
 - disk read and write
