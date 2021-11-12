@@ -68,13 +68,20 @@
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			sectors_per_track: EQU 40                        ; pysical sectors. CP/M sees only 10 bigger sectors 
 0000			sector_size:	   EQU 128                       ; physical sector size. Logical will be 512 for CP/M 
+0000			disk_count:        EQU 2 
+0000			 
+0000			fec_command_restore:      EQU 0x00 
+0000			dfc_command_read_address: EQU 0xc4 
+0000			fdc_command_seek:         EQU 0x10 
+0000			fdc_command_force_interrupt: EQU 0xd0 
+0000			dfc_status_record_not_found_bit: EQU 4 
 0000			 
 0000			RET_opcode:	       EQU 0xC9                      ; RET, used to set the NMI_ISR when the ROM is disabled 
 0000			 
 0000			 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; The first boot sector has the info about 
-0000			; the rest of the boot sector loadind 
+0000			; the rest of the boot sector loading 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			first_sector_load_address:     EQU 0xfa00 
 0000			address_to_load_second_sector: EQU 0xfa02 
@@ -85,35 +92,38 @@
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; Disk related variables 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-0000			ram_fc00_disk_for_next_access:   EQU 0xfc00 
+0000			ram_fc00_drive_for_next_access:   EQU 0xfc00 
 0000			ram_fc01_track_for_next_access:  EQU 0xfc01 
 0000			ram_fc03_sector_for_next_access: EQU 0xfc03 
 0000			 
-0000			ram_fc04_disk_xx:                EQU 0xfc04 
-0000			ram_fc05_track_xx:               EQU 0xfc05 
-0000			ram_fc07_sector_xx:              EQU 0xfc07 
+0000			ram_fc04_drive_xx:               EQU 0xfc04 
+0000			ram_fc05_track_xx:              EQU 0xfc05 
+0000			ram_fc07_sector_xx:             EQU 0xfc07 
 0000			 
-0000			DAT_ram_fc08:                    EQU 0xfc08 
-0000			DAT_ram_fc09:                    EQU 0xfc09 
-0000			DAT_ram_fc0a:                    EQU 0xfc0a 
-0000			DAT_ram_fc0b:                    EQU 0xfc0b 
-0000			DAT_ram_fc0c:                    EQU 0xfc0c 
-0000			DAT_ram_fc0d:                    EQU 0xfc0d 
-0000			DAT_ram_fc0f:                    EQU 0xfc0f 
-0000			DAT_ram_fc10:                    EQU 0xfc10 
-0000			DAT_ram_fc11:                    EQU 0xfc11 
-0000			DAT_ram_fc12:                    EQU 0xfc12 
-0000			DAT_ram_fc13:                    EQU 0xfc13 
-0000			ram_fc14_DMA_address:            EQU 0xfc14 
-0000			DAT_ram_fc16:                    EQU 0xfc16 
-0000			DAT_ram_fc17:                    EQU 0xfc17 
-0000			DAT_ram_fc18:                    EQU 0xfc18 
-0000			DAT_ram_fc19:                    EQU 0xfc19 
+0000			DAT_ram_fc08:                   EQU 0xfc08 
+0000			DAT_ram_fc09:                   EQU 0xfc09 
+0000			DAT_ram_fc0a:                   EQU 0xfc0a 
+0000			DAT_ram_fc0b:                   EQU 0xfc0b 
+0000			DAT_ram_fc0c:                   EQU 0xfc0c 
+0000			DAT_ram_fc0d:                   EQU 0xfc0d 
+0000			DAT_ram_fc0f:                   EQU 0xfc0f 
+0000			DAT_ram_fc10:                   EQU 0xfc10 
+0000			DAT_ram_fc11:                   EQU 0xfc11 
+0000			DAT_ram_fc12:                   EQU 0xfc12 
+0000			DAT_ram_fc13:                   EQU 0xfc13 
+0000			disk_DMA_address:               EQU 0xfc14 
+0000			DAT_ram_fc16:                   EQU 0xfc16 
+0000			DAT_ram_fc17:                   EQU 0xfc17 
+0000			DAT_ram_fc18:                   EQU 0xfc18 
+0000			DAT_ram_fc19:                   EQU 0xfc19 
 0000			 
-0000			mem_fe16_active_disk:            EQU 0xfe16 
-0000			DAT_ram_fe17:                    EQU 0xfe17      ; Disk related flags? 
-0000			mem_fe18_active_track:           EQU 0xfe18 
-0000			mem_fe19_track:                  EQU 0xfe19 
+0000			disk_active_drive:              EQU 0xfe16 
+0000			disk_density:                   EQU 0xfe17 
+0000			disk_density_simple:            EQU 0x00 
+0000			disk_density_double:            EQU 0x20 
+0000			disk_active_track_drive_a:      EQU 0xfe18 
+0000			disk_active_track_drive_b:      EQU 0xfe19 
+0000			disk_active_track_undefined:    EQU 0xff 
 0000			 
 0000			 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
@@ -137,8 +147,11 @@
 0000			; Entry points of code relocated to upper RAM 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			disk_params_destination:    EQU 0xfe71 
+0000			disk_params_drive_a:        EQU 0xfe71 
+0000			disk_params_drive_b:        EQU 0xfe82 
+0000			 
 0000			relocation_destination:     EQU 0xfecd 
-0000			relocation_offset:          EQU 0xfecd - 0x04a8  ; relocation_destination - block_to_relocate_to_fecd 
+0000			relocation_offset:          EQU 0xfecd - 0x04a8  ; relocation_destination - block_to_relocate 
 0000			read_in_DMA_relocated:      EQU 0xfedc           ; reloc_read_in_DMA + relocation_offset 
 0000			move_RAM_relocated:         EQU 0xfecd           ; reloc_move_RAM + relocation_offset 
 0000			read_to_upper_relocated:    EQU 0xfee3           ; reloc_read_to_upper + relocation_offset 
@@ -156,7 +169,7 @@
 0006 c3 05 06		    JP init_screen 
 0009 c3 68 05		    JP init_ports 
 000c c3 d8 01		    JP fdc_restore_and_mem 
-000f c3 b4 01		    JP set_disk_for_next_access 
+000f c3 b4 01		    JP set_drive_for_next_access 
 0012 c3 cc 01		    JP set_track_for_next_access 
 0015 c3 bb 01		    JP set_sector_for_next_access 
 0018 c3 c7 01		    JP set_DMA_address_for_next_access 
@@ -187,17 +200,22 @@
 004c 31 ff ff		    LD SP, 0xffff 
 004f 06 0a		    LD B, 0xa 
 0051 cd 25 04		    CALL wait_b 
+0054			    ; Init the system, io ports, screen and memory 
 0054 cd 68 05		    CALL init_ports 
 0057 cd 05 06		    CALL init_screen 
 005a cd 86 01		    CALL init_upper_RAM 
-005d 18 08		    JR cold_boot_continue                        ; Avoid the NMI entry point at 0x0066 
+005d			    ; Avoid the NMI entry point at 0x0066 
+005d 18 08		    JR cold_boot_continue                         
 005f 3d 00 00 00 00 00 00	    DB 0x3D, 0, 0, 0, 0, 0, 0 
+0066			 
 0066			nmi_isr: 
-0066 c9			    RET                                          ; Just return from the interrupts generated 
-0067			                                                 ; by the floppy controller 
+0066			    ; Just return from the interrupts generated 
+0066			    ; by the floppy controller 
+0066 c9			    RET 
 0067			 
 0067			cold_boot_continue: 
-0067 cd f2 07		    CALL console_write_string                    ; console_write_string gets the zero terminated 
+0067			    ; Show the wellcome message 
+0067 cd f2 07		    CALL console_write_string                    ; console_write_string uses the zero terminated 
 006a			                                                 ; string after the CALL 
 006a 1b .. 2a 3f	    DB 1Bh,"=", 0x20 + 0xa, 0x20 + 0x1f          ; ESC code, move to line 10, column 31 
 006e ..			    DB "*    KAYPRO II    *" 
@@ -206,62 +224,86 @@
 00ad 08			    DB 0x8                                       ; Cursor 
 00ae 00			    DB 0                                         ; End NUL terminated string 
 00af			 
+00af			    ; Read the first sector of the boot disk 
 00af 0e 00		    LD C,0x0 
-00b1 cd b4 01		    CALL set_disk_for_next_access 
+00b1 cd b4 01		    CALL set_drive_for_next_access 
 00b4 01 00 00		    LD BC,0x0 
 00b7 cd cc 01		    CALL set_track_for_next_access 
 00ba 0e 00		    LD C,0x0 
 00bc cd bb 01		    CALL set_sector_for_next_access 
 00bf 01 00 fa		    LD BC, first_sector_load_address 
 00c2 cd c7 01		    CALL set_DMA_address_for_next_access 
-00c5 cd ec 01		    CALL read_sector                             ; Read the first sector 
+00c5 cd ec 01		    CALL read_sector 
 00c8 f3			    DI 
+00c9			    ; Verify the result 
 00c9 b7			    OR A 
 00ca 20 3e		    JR NZ,error_bad_disk 
-00cc ed 4b 02 fa	    LD BC,(address_to_load_second_sector)        ; Use the info from the first sector to continue 
-00d0 ed 43 14 fc	    LD (ram_fc14_DMA_address),BC 
-00d4 ed 4b 04 fa	    LD BC,(address_to_exec_boot)                 ; Store the boot exec addres on the stack. A RET will jump there 
+00cc			    ; Set the DMA destination as instructed by the info 
+00cc			    ; on the first boot sector 
+00cc ed 4b 02 fa	    LD BC,(address_to_load_second_sector) 
+00d0 ed 43 14 fc	    LD (disk_DMA_address),BC 
+00d4			    ; Store the boot exec addres on the stack. A RET will 
+00d4			    ; use this address and start executionthere 
+00d4 ed 4b 04 fa	    LD BC,(address_to_exec_boot) 
 00d8 c5			    PUSH BC 
+00d9			    ; Prepare the loading of the rest of the sectors 
 00d9 ed 4b 06 fa	    LD BC,(count_of_boot_sectors_needed) 
 00dd 41			    LD B,C 
-00de 0e 01		    LD C,0x1                                     ; Continue reading from sector 1 
+00de			    ; Continue reading from sector 1 
+00de 0e 01		    LD C,0x1 
 00e0			read_another_boot_sector: 
-00e0 c5			    PUSH BC                                      ; B has the count of sectors remaining 
-00e1			                                                 ; C has the current sector number 
+00e0			    ; B has the count of sectors remaining 
+00e0			    ; C has the current sector number 
+00e0 c5			    PUSH BC 
+00e1			    ; Load sector C 
 00e1 cd bb 01		    CALL set_sector_for_next_access 
 00e4 cd ec 01		    CALL read_sector 
 00e7 f3			    DI 
+00e8			    ; Verify the result 
 00e8 c1			    POP BC 
 00e9 b7			    OR A 
 00ea 20 1e		    JR NZ,error_bad_disk 
-00ec 2a 14 fc		    LD HL,(ram_fc14_DMA_address) 
+00ec			    ; Increase by 128 the load address (sector size is 128 bytes) 
+00ec 2a 14 fc		    LD HL,(disk_DMA_address) 
 00ef 11 80 00		    LD DE, sector_size 
-00f2 19			    ADD HL,DE                                    ; Increase by 128 the load address (sector size is 128 bytes)?? 
-00f3 22 14 fc		    LD (ram_fc14_DMA_address),HL 
+00f2 19			    ADD HL,DE                                     
+00f3 22 14 fc		    LD (disk_DMA_address),HL 
+00f6			    ; Decrease the count of sectors remaining 
 00f6 05			    DEC B 
-00f7 c8			    RET Z                                        ; Done. Jump to the boot exec address previously pushed 
+00f7			    ; If done , jump to the boot exec address previously pushed to the stack 
+00f7 c8			    RET Z 
+00f8			    ; Not finished, calculate the next sector and track 
 00f8 0c			    INC C 
 00f9 3e 28		    LD A, sectors_per_track 
-00fb b9			    CP C                                         ; Check if we have to go to the next track 
+00fb			    ; Are we on the last sector of the track? 
+00fb b9			    CP C 
+00fc			    ; No, continue reading sector + 1 
 00fc 20 e2		    JR NZ,read_another_boot_sector 
-00fe 0e 10		    LD C,0x10                                    ; Track 0 completed. Continue with sector 1, track 10 
+00fe			    ; Yes, track 0 completed. Continue with track 1, sector 10 
+00fe 0e 10		    LD C,0x10                                     
 0100 c5			    PUSH BC 
-0101 01 01 00		    LD BC,0x0001                                 ; Sector 1 
+0101			    ; Move to track 1 
+0101 01 01 00		    LD BC,0x0001 
 0104 cd cc 01		    CALL set_track_for_next_access 
 0107 c1			    POP BC 
+0108			    ; Loop 
 0108 18 d6		    JR read_another_boot_sector 
+010a			 
 010a			error_bad_disk: 
+010a			    ; Error, write the error message and stop 
 010a cd f2 07		    CALL console_write_string 
 010d .. 00		    DB "\n\r\n\r\aI cannot read your diskette.",0 
 012f cd 1e 04		    CALL turn_off_motor 
 0132			wait_forever: 
-0132 18 fe		    JR wait_forever                              ; Lock the CPU 
+0132			    ; Lock the CPU forever 
+0132 18 fe		    JR wait_forever 
 0134			 
 0134			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0134			; COPY CODE AND DATA TO UPPER RAM 
 0134			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0134			 
-0134			disk_params:                                     ; This data will be copied to 0xfe71 
+0134			; This data will be copied to 0xfe71 
+0134			disk_params: 
 0134			init_data_drive_0: 
 0134 00 00 00 00 00 00 00 00	    DB 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 
 013c 73 ff a2 fe 1a fe 2a fe	    DB 0x73, 0xFF, 0xA2, 0xFE, 0x1A, 0xFE, 0x2A, 0xFE 
@@ -270,73 +312,95 @@
 0145 00 00 00 00 00 00 00 00	    DB 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 
 014d 73 ff a2 fe 43 fe 53 fe	    DB 0x73, 0xFF, 0xA2, 0xFE, 0x43, 0xFE, 0x53, 0xFE 
 0155 00			    DB 0x00 
-0156			init_data_rest:                                  ; Purpose? 
+0156			; Purpose of this part? 
+0156			init_data_rest: 
 0156 12 00 03 07 00 52 00 1f	    DB 0x12, 0x00, 0x03, 0x07, 0x00, 0x52, 0x00, 0x1F 
 015e 00 80 00 08 00 03 00 28	    DB 0x00, 0x80, 0x00, 0x08, 0x00, 0x03, 0x00, 0x28 
 0166 00 03 07 00 c2 00 3f 00	    DB 0x00, 0x03, 0x07, 0x00, 0xC2, 0x00, 0x3F, 0x00 
 016e f0 00 10 00 01 00 01 06	    DB 0xF0, 0x00, 0x10, 0x00, 0x01, 0x00, 0x01, 0x06 
 0176 0b 10 03 08 0d 12 05 0a	    DB 0x0B, 0x10, 0x03, 0x08, 0x0D, 0x12, 0x05, 0x0A 
 017e 0f 02 07 0c 11 04 09 0e	    DB 0x0F, 0x02, 0x07, 0x0C, 0x11, 0x04, 0x09, 0x0E 
+0186			disk_params_end: 
 0186			 
 0186			init_upper_RAM: 
-0186 21 a8 04		    LD HL,block_to_relocate_to_fecd 
-0189 11 cd fe		    LD DE,relocation_destination 
-018c 01 87 00		    LD BC,0x87 
+0186			    ; Copy relocatable disk access to upper RAM to 
+0186			    ; be accessible even when the ROM is swapped out 
+0186 21 a8 04		    LD HL, block_to_relocate 
+0189 11 cd fe		    LD DE, relocation_destination 
+018c 01 87 00		    LD BC, block_to_relocate_end - block_to_relocate ;0x87 
 018f ed b0		    LDIR 
 0191			 
+0191			    ; Copy the disk parameters to upper RAM 
 0191 21 34 01		    LD HL, disk_params 
 0194 11 71 fe		    LD DE, disk_params_destination 
-0197 01 52 00		    LD BC,0x52 
+0197 01 52 00		    LD BC, disk_params_end - disk_params ;0x52 
 019a ed b0		    LDIR 
 019c			 
-019c af			    XOR A                                        ; Init some variables 
-019d 32 09 fc		    LD (DAT_ram_fc09),A 
-01a0 32 0b fc		    LD (DAT_ram_fc0b),A 
-01a3 3e 00		    LD A,0x0 
-01a5 32 17 fe		    LD (DAT_ram_fe17),A 
-01a8 3e ff		    LD A,0xff 
-01aa 32 16 fe		    LD (mem_fe16_active_disk),A 
-01ad 32 18 fe		    LD (mem_fe18_active_track),A 
-01b0 32 19 fe		    LD (mem_fe19_track),A 
+019c			    ; Init some variables 
+019c af			    XOR A 
+019d 32 09 fc		    LD (DAT_ram_fc09), A 
+01a0 32 0b fc		    LD (DAT_ram_fc0b), A 
+01a3 3e 00		    LD A, disk_density_simple 
+01a5 32 17 fe		    LD (disk_density), A 
+01a8 3e ff		    LD A, disk_active_track_undefined 
+01aa 32 16 fe		    LD (disk_active_drive), A 
+01ad 32 18 fe		    LD (disk_active_track_drive_a), A 
+01b0 32 19 fe		    LD (disk_active_track_drive_b), A 
 01b3 c9			    RET 
 01b4			 
 01b4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 01b4			; FLOPPY DISK 
 01b4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 01b4			 
-01b4			set_disk_for_next_access: 
+01b4			set_drive_for_next_access: 
+01b4			    ; C: disk number 
 01b4 79			    LD A,C 
-01b5 32 00 fc		    LD (ram_fc00_disk_for_next_access),A 
-01b8 c3 1d 03		    JP fdc_set_disk 
+01b5 32 00 fc		    LD (ram_fc00_drive_for_next_access),A 
+01b8 c3 1d 03		    JP fdc_set_drive 
+01bb			 
 01bb			set_sector_for_next_access: 
+01bb			    ; BC: sector number 
 01bb 79			    LD A,C 
 01bc 32 03 fc		    LD (ram_fc03_sector_for_next_access),A 
-01bf 3a 17 fe		    LD A,(DAT_ram_fe17) 
+01bf			    ; For double density, send the sector to the controller 
+01bf 3a 17 fe		    LD A,(disk_density) 
 01c2 b7			    OR A 
-01c3 c2 e0 03		    JP NZ,fdc_set_sector_C 
+01c3 c2 e0 03		    JP NZ,fdc_set_sector 
 01c6 c9			    RET 
+01c7			 
 01c7			set_DMA_address_for_next_access: 
-01c7 ed 43 14 fc	    LD (ram_fc14_DMA_address),BC 
+01c7			    ; BC: DMA address 
+01c7 ed 43 14 fc	    LD (disk_DMA_address),BC 
 01cb c9			    RET 
+01cc			 
 01cc			set_track_for_next_access: 
+01cc			    ; C: track number 
 01cc ed 43 01 fc	    LD (ram_fc01_track_for_next_access),BC 
-01d0 3a 17 fe		    LD A,(DAT_ram_fe17) 
+01d0			    ; For double density, seek the track 
+01d0 3a 17 fe		    LD A,(disk_density) 
 01d3 b7			    OR A 
-01d4 c2 d4 03		    JP NZ,fdc_seek_track_C 
+01d4 c2 d4 03		    JP NZ,fdc_seek_track 
 01d7 c9			    RET 
+01d8			 
 01d8			fdc_restore_and_mem: 
-01d8 3a 17 fe		    LD A,(DAT_ram_fe17) 
+01d8			    ;Is disk double density? 
+01d8 3a 17 fe		    LD A, (disk_density) 
 01db b7			    OR A 
-01dc c2 cb 03		    JP NZ,fdc_restore 
+01dc			    ; Yes, restore and done 
+01dc c2 cb 03		    JP NZ, fdc_seek_track_0 
+01df			    ; No. 
+01df			    ; Is fc0a¿? different to 0? 
 01df 3a 0a fc		    LD A,(DAT_ram_fc0a) 
 01e2 b7			    OR A 
-01e3 c2 e9 01		    JP NZ,LAB_ram_01e9 
+01e3			    ; Yes 
+01e3 c2 e9 01		    JP NZ,skip_update_fc09 
+01e6			    ; No, update fc09 
 01e6 32 09 fc		    LD (DAT_ram_fc09),A 
-01e9			LAB_ram_01e9: 
-01e9 c3 cb 03		    JP fdc_restore 
+01e9			skip_update_fc09: 
+01e9 c3 cb 03		    JP fdc_seek_track_0 
 01ec			 
 01ec			read_sector: 
-01ec 3a 17 fe		    LD A,(DAT_ram_fe17) 
+01ec 3a 17 fe		    LD A,(disk_density) 
 01ef b7			    OR A 
 01f0 c2 dc fe		    JP NZ,read_in_DMA_relocated 
 01f3 af			    XOR A 
@@ -347,8 +411,9 @@
 01ff 3e 02		    LD A,0x2 
 0201 32 13 fc		    LD (DAT_ram_fc13),A 
 0204 c3 79 02		    JP LAB_ram_0279 
+0207			 
 0207			write_sector: 
-0207 3a 17 fe		    LD A,(DAT_ram_fe17) 
+0207 3a 17 fe		    LD A,(disk_density) 
 020a b7			    OR A 
 020b c2 ed fe		    JP NZ,write_to_DMA_relocated 
 020e af			    XOR A 
@@ -359,7 +424,7 @@
 0218 c2 32 02		    JP NZ,LAB_ram_0232 
 021b 3e 08		    LD A,0x8 
 021d 32 0b fc		    LD (DAT_ram_fc0b),A 
-0220 3a 00 fc		    LD A,(ram_fc00_disk_for_next_access) 
+0220 3a 00 fc		    LD A,(ram_fc00_drive_for_next_access) 
 0223 32 0c fc		    LD (DAT_ram_fc0c),A 
 0226 2a 01 fc		    LD HL,(ram_fc01_track_for_next_access) 
 0229 22 0d fc		    LD (DAT_ram_fc0d),HL 
@@ -371,7 +436,7 @@
 0236 ca 71 02		    JP Z,LAB_ram_0271 
 0239 3d			    DEC A 
 023a 32 0b fc		    LD (DAT_ram_fc0b),A 
-023d 3a 00 fc		    LD A,(ram_fc00_disk_for_next_access) 
+023d 3a 00 fc		    LD A,(ram_fc00_drive_for_next_access) 
 0240 21 0c fc		    LD HL,0xfc0c 
 0243 be			    CP (HL) 
 0244 c2 71 02		    JP NZ,LAB_ram_0271 
@@ -408,12 +473,12 @@
 0282 b7			    OR A 
 0283 1f			    RRA 
 0284 32 08 fc		    LD (DAT_ram_fc08),A 
-0287 21 09 fc		    LD HL,0xfc09 
+0287 21 09 fc		    LD HL,DAT_ram_fc09 
 028a 7e			    LD A,(HL) 
 028b 36 01		    LD (HL),0x1 
 028d b7			    OR A 
 028e ca b5 02		    JP Z,LAB_ram_02b5 
-0291 3a 00 fc		    LD A,(ram_fc00_disk_for_next_access) 
+0291 3a 00 fc		    LD A,(ram_fc00_drive_for_next_access) 
 0294 21 04 fc		    LD HL,0xfc04 
 0297 be			    CP (HL) 
 0298 c2 ae 02		    JP NZ,LAB_ram_02ae 
@@ -429,8 +494,8 @@
 02b1 b7			    OR A 
 02b2 c4 39 04		    CALL NZ,read_sector_yy 
 02b5			LAB_ram_02b5: 
-02b5 3a 00 fc		    LD A,(ram_fc00_disk_for_next_access) 
-02b8 32 04 fc		    LD (ram_fc04_disk_xx),A 
+02b5 3a 00 fc		    LD A,(ram_fc00_drive_for_next_access) 
+02b8 32 04 fc		    LD (ram_fc04_drive_xx),A 
 02bb 2a 01 fc		    LD HL,(ram_fc01_track_for_next_access) 
 02be 22 05 fc		    LD (ram_fc05_track_xx),HL 
 02c1 3a 08 fc		    LD A,(DAT_ram_fc08) 
@@ -454,7 +519,7 @@
 02e0 29			    ADD HL,HL 
 02e1 11 16 fc		    LD DE,0xfc16 
 02e4 19			    ADD HL,DE 
-02e5 ed 5b 14 fc	    LD DE,(ram_fc14_DMA_address) 
+02e5 ed 5b 14 fc	    LD DE,(disk_DMA_address) 
 02e9 01 80 00		    LD BC,0x80 
 02ec 3a 12 fc		    LD A,(DAT_ram_fc12) 
 02ef b7			    OR A 
@@ -486,132 +551,180 @@
 031a 1a			    LD A,(DE) 
 031b be			    CP (HL) 
 031c c9			    RET 
-031d			fdc_set_disk: 
+031d			     
+031d			fdc_set_drive: 
+031d			    ; Change current drived, update the disk info and check density 
+031d			    ; C: drive number  
 031d 21 00 00		    LD HL,0x0 
 0320 79			    LD A,C 
-0321 fe 02		    CP 0x2 
+0321 fe 02		    CP disk_count 
+0323			    ; Ignore if the drive number is out of range 
 0323 d0			    RET NC 
+0324			    ; Point HL to the disk info for disk A or B 
 0324 b7			    OR A 
-0325 21 71 fe		    LD HL,0xfe71 
-0328 28 03		    JR Z,skip_for_disk_0 
-032a 21 82 fe		    LD HL,0xfe82 
-032d			skip_for_disk_0: 
-032d 3a 16 fe		    LD A,(mem_fe16_active_disk) 
+0325 21 71 fe		    LD HL, disk_params_drive_a 
+0328 28 03		    JR Z, disk_params_skip_for_drive_a 
+032a 21 82 fe		    LD HL, disk_params_drive_b 
+032d			disk_params_skip_for_drive_a: 
+032d			    ; The current drive is the requested one? 
+032d 3a 16 fe		    LD A,(disk_active_drive) 
 0330 b9			    CP C 
+0331			    ; Yes, nothing to do 
 0331 c8			    RET Z 
+0332			    ; No, change the drive 
+0332			    ; Store the new drive number 
 0332 79			    LD A,C 
-0333 32 16 fe		    LD (mem_fe16_active_disk),A 
+0333 32 16 fe		    LD (disk_active_drive),A 
 0336 b7			    OR A 
+0337			    ; Set the read_address_state to the disk param $10 
+0337			    ; it will be disk_density_simple 
 0337 e5			    PUSH HL 
 0338 11 10 00		    LD DE,0x10 
 033b 19			    ADD HL,DE 
 033c 7e			    LD A,(HL) 
-033d 32 17 fe		    LD (DAT_ram_fe17),A 
-0340 21 19 fe		    LD HL,0xfe19 
-0343 28 01		    JR Z,LAB_ram_0346 
-0345 2b			    DEC HL 
-0346			LAB_ram_0346: 
+033d 32 17 fe		    LD (disk_density),A 
+0340			    ; Load active track for disk a or b 
+0340 21 19 fe		    LD HL,disk_active_track_drive_b 
+0343 28 01		    JR Z, skip_for_drive_b 
+0345 2b			    DEC HL ; HL is disk_active_track_drive_a 
+0346			skip_for_drive_b: 
 0346 7e			    LD A,(HL) 
-0347 fe ff		    CP 0xff 
-0349 28 03		    JR Z,LAB_ram_034e 
+0347			    ; Is the active track undefined? 
+0347 fe ff		    CP disk_active_track_undefined 
+0349			    ; Yes, skip. Why???? 
+0349 28 03		    JR Z, skip_get_track_number 
+034b			    ; No, get track number from the controller 
 034b db 11		    IN A,(io_11_fdc_track) 
-034d 77			    LD (HL),A 
-034e			LAB_ram_034e: 
+034d 77			    LD (HL),A; HL is disk_active_track_drive_x 
+034e			skip_get_track_number: 
+034e			    ; C is the disk number 
 034e 79			    LD A,C 
 034f b7			    OR A 
-0350 21 18 fe		    LD HL,0xfe18 
-0353 28 01		    JR Z,LAB_ram_0356 
-0355 23			    INC HL 
-0356			LAB_ram_0356: 
+0350			    ; Load active track for disk a or b 
+0350 21 18 fe		    LD HL, disk_active_track_drive_a 
+0353 28 01		    JR Z, skip_for_drive_a 
+0355 23			    INC HL; HL is disk_active_track_drive_b 
+0356			skip_for_drive_a: 
 0356 7e			    LD A,(HL) 
+0357			    ; Send the requested track to the controller 
 0357 d3 11		    OUT (io_11_fdc_track),A 
 0359 eb			    EX DE,HL 
 035a e1			    POP HL 
-035b fe ff		    CP 0xff 
+035b			    ; Is the active track undefined? 
+035b fe ff		    CP disk_active_track_undefined 
+035d			    ; No, we are done 
 035d c0			    RET NZ 
+035e			    ; Yes 
 035e cd ef 03		    CALL fdc_ensure_ready 
 0361 cd d8 01		    CALL fdc_restore_and_mem 
-0364			    ; Read address in single density 
+0364			    ; Disable double density 
 0364 db 1c		    IN A,(io_1c_system_bits) 
-0366 e6 df		    AND ~system_bit_double_density_mask          ; Disable double density 
+0366 e6 df		    AND ~system_bit_double_density_mask           
 0368 f6 00		    OR 0x0 
 036a d3 1c		    OUT (io_1c_system_bits),A 
+036c			    ; Can we read the address in simple density? 
 036c cd c1 03		    CALL fdc_read_address 
-036f 28 0e		    JR Z,local_read_address_ok 
-0371			    ; Retry read address with double density 
+036f			    ; Yes 
+036f 28 0e		    JR Z, simple_density_disk 
+0371			    ; No, retry with double density 
+0371			    ; Enable double density 
 0371 db 1c		    IN A,(io_1c_system_bits) 
 0373 e6 df		    AND ~system_bit_double_density_mask 
-0375 f6 20		    OR system_bit_double_density_mask            ; Enable double density 
+0375 f6 20		    OR system_bit_double_density_mask 
 0377 d3 1c		    OUT (io_1c_system_bits),A 
+0379			    ; Can we read the address? 
 0379 cd c1 03		    CALL fdc_read_address 
+037c			    ; No, there is nothing we can do 
 037c c0			    RET NZ 
-037d 18 1e		    JR local_read_address_second_ok 
-037f			local_read_address_ok: 
+037d			    ; Yes 
+037d 18 1e		    JR double_density_disk 
+037f			simple_density_disk: 
+037f			    ; HL is disk_params_drive_x 
 037f e5			    PUSH HL 
 0380 d5			    PUSH DE 
+0381			    ; Set 0 on the disk params $0 and $1 
 0381 11 00 00		    LD DE,0x0000 
 0384 73			    LD (HL),E 
 0385 23			    INC HL 
 0386 72			    LD (HL),D 
+0387			    ; Set 0xfea2 on the disk params $a and $b 
 0387 11 09 00		    LD DE,0x0009 
 038a 19			    ADD HL,DE 
 038b 11 a2 fe		    LD DE,0xfea2 
 038e 73			    LD (HL),E 
 038f 23			    INC HL 
 0390 72			    LD (HL),D 
+0391			    ; Set disk_density_simple in the disk param $10 
 0391 11 05 00		    LD DE,0x0005 
 0394 19			    ADD HL,DE 
-0395 3e 00		    LD A,0x0 
+0395 3e 00		    LD A, disk_density_simple 
 0397 77			    LD (HL),A 
-0398 32 17 fe		    LD (DAT_ram_fe17),A 
-039b 18 1c		    JR local_read_address_end 
-039d			local_read_address_second_ok: 
+0398			    ; Store the current disk density 
+0398 32 17 fe		    LD (disk_density),A 
+039b 18 1c		    JR set_drive_end 
+039d			double_density_disk: 
+039d			    ; HL is disk_params_drive_x 
 039d e5			    PUSH HL 
 039e d5			    PUSH DE 
+039f			    ; Set 0xfeb1 on the disk params $0 and $1 
 039f 11 b1 fe		    LD DE,0xfeb1 
 03a2 73			    LD (HL),E 
 03a3 23			    INC HL 
 03a4 72			    LD (HL),D 
+03a5			    ; Set 0xfe93 on the disk params $a and $b 
 03a5 11 09 00		    LD DE,0x0009 
 03a8 19			    ADD HL,DE 
 03a9 11 93 fe		    LD DE,0xfe93 
 03ac 73			    LD (HL),E 
 03ad 23			    INC HL 
 03ae 72			    LD (HL),D 
-03af 11 05 00		    LD DE,0x5 
+03af			    ; Set disk_density_double in the disk param $10 
+03af 11 05 00		    LD DE,0x0005 
 03b2 19			    ADD HL,DE 
-03b3 3e 20		    LD A,0x20 
+03b3 3e 20		    LD A, disk_density_double 
 03b5 77			    LD (HL),A 
-03b6 32 17 fe		    LD (DAT_ram_fe17),A 
-03b9			local_read_address_end: 
-03b9 d1			    POP DE 
-03ba e1			    POP HL 
+03b6			    ; Store the current disk density 
+03b6 32 17 fe		    LD (disk_density),A 
+03b9			set_drive_end: 
+03b9 d1			    POP DE ; DE is disk_active_track_drive_a 
+03ba e1			    POP HL ; HL is disk_params_drive_x 
+03bb			    ; Why set trach with the sector value???? 
 03bb db 12		    IN A,(io_12_fdc_sector) 
 03bd d3 11		    OUT (io_11_fdc_track),A 
+03bf			    ; Update disk_active_track_drive_x 
 03bf 12			    LD (DE),A 
 03c0 c9			    RET 
+03c1			 
 03c1			fdc_read_address: 
-03c1 3e c4		    LD A,0xc4 
+03c1			    ; FDC read address command 
+03c1 3e c4		    LD A, dfc_command_read_address 
 03c3 d3 10		    OUT (io_10_fdc_command_status),A 
 03c5 cd 31 04		    CALL fdc_halt 
-03c8 cb 67		    BIT 0x4,A 
+03c8			    ; Is record not found? 
+03c8 cb 67		    BIT dfc_status_record_not_found_bit, A 
 03ca c9			    RET 
-03cb			fdc_restore: 
+03cb			 
+03cb			fdc_seek_track_0: 
 03cb cd ef 03		    CALL fdc_ensure_ready 
-03ce 3e 00		    LD A,0x0 
-03d0 d3 10		    OUT (io_10_fdc_command_status),A 
+03ce			    ; Restore controller 
+03ce 3e 00		    LD A, fec_command_restore 
+03d0 d3 10		    OUT (io_10_fdc_command_status), A 
 03d2 18 5d		    JR fdc_halt 
-03d4			fdc_seek_track_C: 
+03d4			 
+03d4			fdc_seek_track: 
 03d4 cd ef 03		    CALL fdc_ensure_ready 
 03d7 79			    LD A,C 
 03d8 d3 13		    OUT (io_13_fdc_data),A 
-03da 3e 10		    LD A,0x10 
+03da 3e 10		    LD A, fdc_command_seek 
 03dc d3 10		    OUT (io_10_fdc_command_status),A 
 03de 18 51		    JR fdc_halt 
-03e0			fdc_set_sector_C: 
+03e0			 
+03e0			fdc_set_sector: 
+03e0			    ; C = sector 
 03e0 79			    LD A,C 
 03e1 d3 12		    OUT (io_12_fdc_sector),A 
 03e3 c9			    RET 
+03e4			 
 03e4			sector_translation: 
 03e4 7a			    LD A,D 
 03e5 b3			    OR E 
@@ -623,22 +736,24 @@
 03eb 6e			    LD L,(HL) 
 03ec 26 00		    LD H,0x0 
 03ee c9			    RET 
+03ef			 
 03ef			fdc_ensure_ready: 
+03ef			    ; Interuupts any pending command 
 03ef e5			    PUSH HL 
 03f0 d5			    PUSH DE 
 03f1 c5			    PUSH BC 
-03f2 3e d0		    LD A,0xd0 
+03f2 3e d0		    LD A, fdc_command_force_interrupt 
 03f4 d3 10		    OUT (io_10_fdc_command_status),A 
 03f6 cd 0f 04		    CALL turn_on_motor 
-03f9			 
-03f9 3a 16 fe		    LD A,(mem_fe16_active_disk) 
+03f9 3a 16 fe		    LD A,(disk_active_drive) 
 03fc 5f			    LD E,A 
 03fd db 1c		    IN A,(io_1c_system_bits) 
 03ff e6 fc		    AND ~(system_bit_drive_a_mask|system_bit_drive_b_mask) ; Clear drive select bits 
 0401 b3			    OR E 
 0402 3c			    INC A                                          ; disk A(0) to mask 0x1, disk B(1) to mask 0x2 
-0403 e6 df		    AND ~system_bit_double_density_mask            ; Disable double density 
-0405 21 17 fe		    LD HL,DAT_ram_fe17 
+0403			    ; Reflect the disk density variable on the system bits. 
+0403 e6 df		    AND ~system_bit_double_density_mask 
+0405 21 17 fe		    LD HL,disk_density 
 0408 b6			    OR (HL) 
 0409 d3 1c		    OUT (io_1c_system_bits),A 
 040b c1			    POP BC 
@@ -704,7 +819,7 @@
 044b 20 f1		    JR NZ,LAB_ram_043e 
 044d 15			    DEC D 
 044e 28 1c		    JR Z,LAB_ram_046c 
-0450 cd cb 03		    CALL fdc_restore 
+0450 cd cb 03		    CALL fdc_seek_track_0 
 0453 1e 0f		    LD E,0xf 
 0455 18 e7		    JR LAB_ram_043e 
 0457			LAB_ram_0457: 
@@ -741,25 +856,25 @@
 0487 20 f1		    JR NZ,LAB_ram_047a 
 0489 15			    DEC D 
 048a c8			    RET Z 
-048b cd cb 03		    CALL fdc_restore 
+048b cd cb 03		    CALL fdc_seek_track_0 
 048e 1e 0f		    LD E,0xf 
 0490 18 e8		    JR LAB_ram_047a 
 0492			go_to_track_sector: 
-0492 3a 04 fc		    LD A,(ram_fc04_disk_xx) 
+0492 3a 04 fc		    LD A,(ram_fc04_drive_xx) 
 0495 4f			    LD C,A 
-0496 cd 1d 03		    CALL fdc_set_disk 
+0496 cd 1d 03		    CALL fdc_set_drive 
 0499 ed 4b 05 fc	    LD BC,(ram_fc05_track_xx) 
-049d cd d4 03		    CALL fdc_seek_track_C 
+049d cd d4 03		    CALL fdc_seek_track 
 04a0 3a 07 fc		    LD A,(ram_fc07_sector_xx) 
 04a3 4f			    LD C,A 
-04a4 cd e0 03		    CALL fdc_set_sector_C 
+04a4 cd e0 03		    CALL fdc_set_sector 
 04a7 c9			    RET 
 04a8			 
 04a8			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 04a8			; CODE RELOCATED TO UPPER RAM 
 04a8			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 04a8			 
-04a8			block_to_relocate_to_fecd: 
+04a8			block_to_relocate: 
 04a8			reloc_move_RAM: 
 04a8			    ; Hide the ROM 
 04a8 db 1c		    IN A,(io_1c_system_bits) 
@@ -773,7 +888,7 @@
 04b4 d3 1c		    OUT (io_1c_system_bits),A 
 04b6 c9			    RET 
 04b7			reloc_read_in_DMA: 
-04b7 2a 14 fc		    LD HL,(ram_fc14_DMA_address) 
+04b7 2a 14 fc		    LD HL,(disk_DMA_address) 
 04ba 06 01		    LD B,0x1 
 04bc 18 05		    JR reloc_read_internal 
 04be			reloc_read_to_upper: 
@@ -783,7 +898,7 @@
 04c3 11 88 9c		    LD DE,0x9c88 
 04c6 18 0f		    JR reloc_RW_internal 
 04c8			reloc_write_to_DMA: 
-04c8 2a 14 fc		    LD HL,(ram_fc14_DMA_address) 
+04c8 2a 14 fc		    LD HL,(disk_DMA_address) 
 04cb 06 01		    LD B,0x1 
 04cd 18 05		    JR reloc_write_internal 
 04cf			reloc_write_from_upper: 
@@ -859,6 +974,7 @@
 052b c8			    RET Z 
 052c 3e 01		    LD A,0x1 
 052e c9			    RET 
+052f			block_to_relocate_end: 
 052f			 
 052f			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 052f			; IO PORTS INITIALIZATION 
