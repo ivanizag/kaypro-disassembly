@@ -67,19 +67,29 @@
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; Disk constants 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-0000			sectors_per_track: EQU 40                        ; pysical sectors. CP/M sees only 10 bigger sectors 
-0000			sector_size:	   EQU 128                       ; physical sector size. Logical will be 512 for CP/M 
-0000			disk_count:        EQU 2 
+0000			sectors_per_track:  EQU 40 ; pysical sectors. CP/M sees only 10 bigger sectors 
+0000			sector_size:	    EQU 128 ; physical sector size. Logical will be 512 for CP/M 
+0000			disk_count:         EQU 2 ; 0 is A: and 1 is B: 
+0000			read_write_retries: EQU 3 
 0000			 
 0000			fdc_command_restore:             EQU 0x00 
 0000			fdc_command_read_address:        EQU 0xc4 
 0000			fdc_command_seek:                EQU 0x10 
+0000			fdc_command_read_sector:         EQU 0x88 
+0000			fdc_command_write_sector:        EQU 0xac 
 0000			fdc_command_force_interrupt:     EQU 0xd0 
+0000			 
+0000			rw_mode_dma:    EQU 1 ; We read or write ¿128? bytes 
+0000			rw_mode_buffer: EQU 4 ; We read or write the full 512 bytes buffer 
+0000			 
 0000			 
 0000			fdc_status_record_busy_bit:      EQU 0 
 0000			fdc_status_record_not_found_bit: EQU 4 
+0000			fdc_status_read_error_bitmask:   EQU 0x9c ; Not ready, record not found, crc error or lost data 
+0000			fdc_status_write_error_bitmask:  EQU 0xfc ; Not ready, write_protect, write fault, record not found, crc error or lost data 
 0000			 
-0000			RET_opcode:	       EQU 0xC9                      ; RET, used to set the NMI_ISR when the ROM is disabled 
+0000			; RET, used to set the NMI_ISR when the ROM is disabled 
+0000			RET_opcode:	       EQU 0xC9 
 0000			 
 0000			 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
@@ -168,7 +178,7 @@
 0000			move_RAM_relocated:          EQU 0xfecd           ; reloc_move_RAM + relocation_offset 
 0000			read_to_buffer_relocated:    EQU 0xfee3           ; reloc_read_to_buffer + relocation_offset 
 0000			write_from_buffer_relocated: EQU 0xfef4           ; reloc_write_from_buffer + relocation_offset 
-0000			write_to_DMA_relocated:      EQU 0xfeed           ; reloc_write_to_DMA + relocation_offset 
+0000			write_from_DMA_relocated:      EQU 0xfeed         ; reloc_write_from_DMA + relocation_offset 
 0000			 
 0000			 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
@@ -440,7 +450,7 @@
 0207 3a 17 fe		    LD A,(disk_density) 
 020a b7			    OR A 
 020b			    ; Yes, go directly to the write routine 
-020b c2 ed fe		    JP NZ,write_to_DMA_relocated 
+020b c2 ed fe		    JP NZ, write_from_DMA_relocated 
 020e			    ; No, some preparation is needed as the calls to set_sector_for_next_access 
 020e			    ; and set_track_for_next_access do not send the info to the fdc on simple density  
 020e af			    XOR A 
@@ -765,7 +775,7 @@
 03c1			    ; FDC read address command 
 03c1 3e c4		    LD A, fdc_command_read_address 
 03c3 d3 10		    OUT (io_10_fdc_command), A 
-03c5 cd 31 04		    CALL fdc_halt 
+03c5 cd 31 04		    CALL wait_for_result 
 03c8			    ; Is record not found? 
 03c8 cb 67		    BIT fdc_status_record_not_found_bit, A 
 03ca c9			    RET 
@@ -775,7 +785,7 @@
 03ce			    ; Restore controller 
 03ce 3e 00		    LD A, fdc_command_restore 
 03d0 d3 10		    OUT (io_10_fdc_command), A 
-03d2 18 5d		    JR fdc_halt 
+03d2 18 5d		    JR wait_for_result 
 03d4			 
 03d4			seek_track: 
 03d4			    ; C: track number 
@@ -785,7 +795,7 @@
 03d8 d3 13		    OUT (io_13_fdc_data),A 
 03da 3e 10		    LD A, fdc_command_seek 
 03dc d3 10		    OUT (io_10_fdc_command),A 
-03de 18 51		    JR fdc_halt 
+03de 18 51		    JR wait_for_result 
 03e0			 
 03e0			set_sector_in_fdc: 
 03e0			    ; C = sector 
@@ -863,7 +873,7 @@
 042e 10 f5		    DJNZ wait_b 
 0430 c9			    RET 
 0431			 
-0431			fdc_halt: 
+0431			wait_for_result: 
 0431			    ; The fdc generates a NMI when it requires attention. The NMI handler 
 0431			    ; is just a RET that will stop the HALT and execute the next instruction. 
 0431 76			    HALT 
@@ -874,62 +884,71 @@
 0438 c9			    RET 
 0439			 
 0439			read_write_sector_internal: 
-0439 2e 03		    LD L,0x3 
-043b			LAB_ram_043b: 
+0439			    ; retry 3 times before giving up 
+0439 2e 03		    LD L, read_write_retries 
+043b			read_write_sector_internal_retry: 
 043b 11 0f 04		    LD DE,0x040f 
-043e			LAB_ram_043e: 
+043e			read_write_sector_internal_loop: 
 043e e5			    PUSH HL 
 043f d5			    PUSH DE 
 0440 cd 92 04		    CALL go_to_track_sector 
 0443 cd f4 fe		    CALL write_from_buffer_relocated 
 0446 d1			    POP DE 
 0447 e1			    POP HL 
-0448 28 0d		    JR Z,LAB_ram_0457 
+0448 28 0d		    JR Z, discard_512_bytes 
 044a 1d			    DEC E 
-044b 20 f1		    JR NZ,LAB_ram_043e 
+044b 20 f1		    JR NZ, read_write_sector_internal_loop 
 044d 15			    DEC D 
-044e 28 1c		    JR Z,LAB_ram_046c 
+044e 28 1c		    JR Z, process_result 
 0450 cd cb 03		    CALL seek_track_0 
 0453 1e 0f		    LD E,0xf 
-0455 18 e7		    JR LAB_ram_043e 
-0457			LAB_ram_0457: 
-0457 06 00		    LD B,0x0 
-0459 3e 88		    LD A,0x88 
+0455 18 e7		    JR read_write_sector_internal_loop 
+0457			discard_512_bytes: 
+0457 06 00		    LD B,0x0 ; read 256 bytes 
+0459 3e 88		    LD A, fdc_command_read_sector 
 045b d3 10		    OUT (io_10_fdc_command),A 
-045d			LAB_ram_045d: 
+045d			read_first_256_bytes_loop: 
+045d			    ; Read and discard 256 bytes (B from 0 and batck to 0) 
 045d 76			    HALT 
 045e db 13		    IN A,(io_13_fdc_data) 
-0460 10 fb		    DJNZ LAB_ram_045d 
-0462			LAB_ram_0462: 
+0460 10 fb		    DJNZ read_first_256_bytes_loop 
+0462			read_second_256_bytes_loop: 
+0462			    ; Read and discard 256 bytes (B from 0 and batck to 0) 
 0462 76			    HALT 
 0463 db 13		    IN A,(io_13_fdc_data) 
-0465 10 fb		    DJNZ LAB_ram_0462 
-0467 cd 31 04		    CALL fdc_halt 
-046a e6 9c		    AND 0x9c 
-046c			LAB_ram_046c: 
+0465 10 fb		    DJNZ read_second_256_bytes_loop 
+0467 cd 31 04		    CALL wait_for_result 
+046a			    ; Use only the error related bits 
+046a e6 9c		    AND fdc_status_read_error_bitmask 
+046c			process_result: 
 046c 32 10 fc		    LD (rw_result),A 
+046f			    ; No errors, return 
 046f c8			    RET Z 
+0470			    ; If we have retries lett, retry 
 0470 2d			    DEC L 
-0471 20 c8		    JR NZ,LAB_ram_043b 
+0471 20 c8		    JR NZ,read_write_sector_internal_retry 
+0473			    ; No more retries, exit with error ff 
 0473 3e ff		    LD A,0xff 
-0475 18 f5		    JR LAB_ram_046c 
+0475 18 f5		    JR process_result 
+0477			 
 0477			read_sector_xx: 
-0477 11 0f 04		    LD DE,0x40f 
-047a			LAB_ram_047a: 
+0477 11 0f 04		    LD DE,0x040f ; track 4, sector f 
+047a			read_sector_xx_loop: 
 047a d5			    PUSH DE 
 047b cd 92 04		    CALL go_to_track_sector 
 047e cd e3 fe		    CALL read_to_buffer_relocated 
 0481 32 10 fc		    LD (rw_result),A 
 0484 d1			    POP DE 
+0485			    ; Loop completed, return 
 0485 c8			    RET Z 
 0486 1d			    DEC E 
-0487 20 f1		    JR NZ,LAB_ram_047a 
+0487 20 f1		    JR NZ,read_sector_xx_loop 
 0489 15			    DEC D 
 048a c8			    RET Z 
 048b cd cb 03		    CALL seek_track_0 
 048e 1e 0f		    LD E,0xf 
-0490 18 e8		    JR LAB_ram_047a 
-0492			     
+0490 18 e8		    JR read_sector_xx_loop 
+0492			 
 0492			go_to_track_sector: 
 0492 3a 04 fc		    LD A,(ram_fc04_drive_xx) 
 0495 4f			    LD C,A 
@@ -960,25 +979,31 @@
 04b6 c9			    RET 
 04b7			 
 04b7			reloc_read_in_DMA: 
+04b7			    ; Read 128 bytes into DMA 
 04b7 2a 14 fc		    LD HL,(disk_DMA_address) 
-04ba 06 01		    LD B,0x1 
+04ba 06 01		    LD B, rw_mode_dma 
 04bc 18 05		    JR reloc_read_internal 
 04be			reloc_read_to_buffer: 
+04be			    ; Read 512 bytes into buffer 
 04be 21 16 fc		    LD HL, sector_buffer_0 
-04c1 06 04		    LD B,0x4 
+04c1 06 04		    LD B, rw_mode_buffer 
 04c3			reloc_read_internal: 
-04c3 11 88 9c		    LD DE,0x9c88 
+04c3			    ; Configure RW for read 
+04c3 11 88 9c		    LD DE, fdc_status_read_error_bitmask * 0x100 + fdc_command_read_sector 
 04c6 18 0f		    JR reloc_RW_internal 
 04c8			 
-04c8			reloc_write_to_DMA: 
+04c8			reloc_write_from_DMA: 
+04c8			    ; Write 128 bytes from DMA 
 04c8 2a 14 fc		    LD HL,(disk_DMA_address) 
-04cb 06 01		    LD B,0x1 
+04cb 06 01		    LD B, rw_mode_dma 
 04cd 18 05		    JR reloc_write_internal 
 04cf			reloc_write_from_buffer: 
+04cf			    ; Write 512 bytes from buffer 
 04cf 21 16 fc		    LD HL, sector_buffer_0 
-04d2 06 04		    LD B,0x4 
+04d2 06 04		    LD B, rw_mode_buffer 
 04d4			reloc_write_internal: 
-04d4 11 ac fc		    LD DE,0xfcac 
+04d4			    ; Configure RW for write 
+04d4 11 ac fc		    LD DE, fdc_status_write_error_bitmask * 0x100 + fdc_command_write_sector 
 04d7			 
 04d7			reloc_RW_internal: 
 04d7 cd ef 03		    CALL fdc_ensure_ready 
@@ -988,53 +1013,66 @@
 04dd cb bf		    RES system_bit_bank,A 
 04df d3 1c		    OUT (io_1c_system_bits),A 
 04e1			    ; Setup RET as the handler of NMI 
-04e1			    ; as the ROM is paged out, there is no handler 
-04e1			    ; Store the previous value to restore it later 
+04e1			    ; As the ROM is paged out, there is no handler. 
 04e1 e5			    PUSH HL 
+04e2			    ; Store in A' the current first byte on 0x66 
 04e2 21 66 00		    LD HL, nmi_isr 
 04e5 7e			    LD A,(HL) 
-04e6 08			    EX AF,AF' 
+04e6 08			    EX AF,AF' ; ' 
+04e7			    ; Set RET as the handler of NMI 
 04e7 36 c9		    LD (HL), RET_opcode 
 04e9 e1			    POP HL 
-04ea			 
-04ea 78			    LD A,B 
+04ea			    ; 
+04ea 78			    LD A,B ; A = rw_mode 
 04eb 01 13 80		    LD BC, sector_size * 0x100 + io_13_fdc_data  ; Setup of the INI command 
-04ee cb 47		    BIT 0x0,A 
-04f0 20 02		    JR NZ,LAB_ram_04f4 
+04ee cb 47		    BIT 0x0,A  
+04f0 20 02		    JR NZ, read_rw_internal_cont 
+04f2			    ; for rw_mode_nuffer let's set B to zero 
 04f2 06 00		    LD B,0x0 
-04f4			LAB_ram_04f4: 
-04f4 fe 01		    CP 0x1 
+04f4			read_rw_internal_cont: 
+04f4			    ; Is mode DMA? 
+04f4 fe 01		    CP rw_mode_dma 
 04f6 f5			    PUSH AF 
 04f7 7b			    LD A,E 
-04f8 fe ac		    CP 0xac 
-04fa 28 11		    JR Z,reloc_write_sector 
+04f8			    ; Is the command a write? 
+04f8 fe ac		    CP fdc_command_write_sector 
+04fa			    ; Yes, go to write 
+04fa 28 11		    JR Z, reloc_write_sector 
+04fc			    ; No, let's read 
 04fc d3 10		    OUT (io_10_fdc_command),A 
 04fe f1			    POP AF 
-04ff 28 05		    JR Z,reloc_read_second_half_of_sector 
-0501			reloc_read_first_half_of_sector: 
+04ff			    ; if the mode is DMA, let's read the 128 bytes 
+04ff 28 05		    JR Z, reloc_read_the_rest 
+0501			reloc_read_first_256_bytes: 
 0501 76			    HALT 
-0502 ed a2		    INI                                          ; IN from io_13_fdc_data 
-0504 20 fb		    JR NZ,reloc_read_first_half_of_sector 
-0506			reloc_read_second_half_of_sector: 
+0502 ed a2		    INI ; IN from io_13_fdc_data 
+0504 20 fb		    JR NZ, reloc_read_first_256_bytes 
+0506			reloc_read_the_rest: 
+0506			    ; The rest will be 256 bytes on buffer mode and 128 bytes in DMA mode 
 0506 76			    HALT 
-0507 ed a2		    INI                                          ; IN from io_13_fdc_data 
-0509 20 fb		    JR NZ,reloc_read_second_half_of_sector 
-050b 18 0f		    JR read_sector_completed 
+0507 ed a2		    INI ; IN from io_13_fdc_data 
+0509 20 fb		    JR NZ, reloc_read_the_rest 
+050b			    ; We are done 
+050b 18 0f		    JR read_write_sector_completed 
+050d			 
 050d			reloc_write_sector: 
-050d d3 10		    OUT (io_10_fdc_command),A 
+050d d3 10		    OUT (io_10_fdc_command),A ; A = fdc_command_write_sector 
 050f f1			    POP AF 
-0510 28 05		    JR Z,reloc_write_second_half_of_sector 
-0512			reloc_write_first_half_of_sector: 
+0510			    ; if the mode is DMA, let's write the 128 bytes 
+0510 28 05		    JR Z, reloc_write_the_rest 
+0512			reloc_write_first_256_bytes: 
 0512 76			    HALT 
-0513 ed a3		    OUTI                                         ; OUT to io_13_fdc_data 
-0515 20 fb		    JR NZ,reloc_write_first_half_of_sector 
-0517			reloc_write_second_half_of_sector: 
+0513 ed a3		    OUTI ; OUT to io_13_fdc_data 
+0515 20 fb		    JR NZ,reloc_write_first_256_bytes 
+0517			reloc_write_the_rest: 
+0517			    ; The rest will be 256 bytes on buffer mode and 128 bytes in DMA mode 
 0517 76			    HALT 
-0518 ed a3		    OUTI                                         ; OUT to io_13_fdc_data 
-051a 20 fb		    JR NZ,reloc_write_second_half_of_sector 
-051c			read_sector_completed: 
+0518 ed a3		    OUTI ; OUT to io_13_fdc_data 
+051a 20 fb		    JR NZ, reloc_write_the_rest 
+051c			 
+051c			read_write_sector_completed: 
 051c			    ; Restore the byte that was on the NMI handler 
-051c 08			    EX AF,AF' 
+051c 08			    EX AF,AF' ; ' 
 051d 32 66 00		    LD (nmi_isr),A 
 0520			    ; Restore the ROM 
 0520 db 1c		    IN A,(io_1c_system_bits) 
@@ -1042,10 +1080,12 @@
 0524 d3 1c		    OUT (io_1c_system_bits),A 
 0526 fb			    EI 
 0527			    ; Wait for the disk access result code 
-0527 cd 31 04		    CALL fdc_halt 
+0527 cd 31 04		    CALL wait_for_result 
 052a			    ; Return the result code: 0 or 1 
-052a a2			    AND D ; = fc ?? 
+052a a2			    AND D ; fdc_status_read_error_bitmask or fdc_status_write_error_bitmask 
+052b			    ; If no error return with A = 0 
 052b c8			    RET Z 
+052c			    ; If error return with A = 1 
 052c 3e 01		    LD A,0x1 
 052e c9			    RET 
 052f			block_to_relocate_end: 
