@@ -19,7 +19,8 @@ io_05_keyboard_data:      EQU 0x05
 io_06_serial_control:     EQU 0x06
 io_07_keyboard_control:   EQU 0x07
 io_08_parallel_data:      EQU 0x08
-io_10_fdc_command_status: EQU 0x10
+io_10_fdc_status:         EQU 0x10 ; as IN it is a get status
+io_10_fdc_command:        EQU 0x10 ; as OUT it is a command
 io_11_fdc_track:          EQU 0x11
 io_12_fdc_sector:         EQU 0x12
 io_13_fdc_data:           EQU 0x13
@@ -69,11 +70,13 @@ sectors_per_track: EQU 40                        ; pysical sectors. CP/M sees on
 sector_size:	   EQU 128                       ; physical sector size. Logical will be 512 for CP/M
 disk_count:        EQU 2
 
-fec_command_restore:      EQU 0x00
-dfc_command_read_address: EQU 0xc4
-fdc_command_seek:         EQU 0x10
-fdc_command_force_interrupt: EQU 0xd0
-dfc_status_record_not_found_bit: EQU 4
+fdc_command_restore:             EQU 0x00
+fdc_command_read_address:        EQU 0xc4
+fdc_command_seek:                EQU 0x10
+fdc_command_force_interrupt:     EQU 0xd0
+
+fdc_status_record_busy_bit:      EQU 0
+fdc_status_record_not_found_bit: EQU 4
 
 RET_opcode:	       EQU 0xC9                      ; RET, used to set the NMI_ISR when the ROM is disabled
 
@@ -91,30 +94,39 @@ count_of_boot_sectors_needed:  EQU 0xfa06
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Disk related variables
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-ram_fc00_drive_for_next_access:   EQU 0xfc00
-ram_fc01_track_for_next_access:  EQU 0xfc01
+
+; D-T-S with the requested data.
+; For double density disks the fdc (flopddy disk constroller) is given the info.
+; For simple density disks the info is just stored here
+ram_fc00_drive_for_next_access:  EQU 0xfc00
+ram_fc01_track_for_next_access:  EQU 0xfc01 ; 2 bytes
 ram_fc03_sector_for_next_access: EQU 0xfc03
 
 ram_fc04_drive_xx:               EQU 0xfc04
-ram_fc05_track_xx:              EQU 0xfc05
-ram_fc07_sector_xx:             EQU 0xfc07
+ram_fc05_track_xx:               EQU 0xfc05 ; 2 bytes
+ram_fc07_sector4_xx:             EQU 0xfc07
 
-DAT_ram_fc08:                   EQU 0xfc08
-DAT_ram_fc09:                   EQU 0xfc09
-DAT_ram_fc0a:                   EQU 0xfc0a
-DAT_ram_fc0b:                   EQU 0xfc0b
-DAT_ram_fc0c:                   EQU 0xfc0c
-DAT_ram_fc0d:                   EQU 0xfc0d
-DAT_ram_fc0f:                   EQU 0xfc0f
-DAT_ram_fc10:                   EQU 0xfc10
-DAT_ram_fc11:                   EQU 0xfc11
-DAT_ram_fc12:                   EQU 0xfc12
-DAT_ram_fc13:                   EQU 0xfc13
-disk_DMA_address:               EQU 0xfc14
-DAT_ram_fc16:                   EQU 0xfc16
-DAT_ram_fc17:                   EQU 0xfc17
-DAT_ram_fc18:                   EQU 0xfc18
-DAT_ram_fc19:                   EQU 0xfc19
+DAT_ram_fc08_sector4:            EQU 0xfc08 ; sector_for_next_access / 4
+DAT_ram_fc09:                    EQU 0xfc09 ; 2 bytes
+DAT_ram_fc0a:                    EQU 0xfc0a
+DAT_ram_fc0b:                    EQU 0xfc0b
+
+; Copy of the xx_for_next access on some simple density writes
+DAT_ram_fc0c_drive:              EQU 0xfc0c
+DAT_ram_fc0d_track:              EQU 0xfc0d ; 2 bytes
+DAT_ram_fc0f_sector:             EQU 0xfc0f
+
+rw_result:                       EQU 0xfc10
+DAT_ram_fc11:                    EQU 0xfc11
+DAT_ram_fc12:                    EQU 0xfc12
+DAT_ram_fc13:                    EQU 0xfc13
+disk_DMA_address:                EQU 0xfc14 ; 2 bytes
+
+; There are 4 sector buffers. To select the buffer we get the sector modulo 4
+sector_buffer_0:                EQU 0xfc16
+sector_buffer_1:                EQU 0xfc16 + sector_size
+sector_buffer_2:                EQU 0xfc16 + sector_size * 2
+sector_buffer_3:                EQU 0xfc16 + sector_size * 3
 
 disk_active_drive:              EQU 0xfe16
 disk_density:                   EQU 0xfe17
@@ -133,7 +145,7 @@ console_esc_mode_clear:      EQU 0               ; No ESC pending
 console_esc_mode_enabled:    EQU 1               ; Next char is the ESC command
 console_esc_mode_arg_1:      EQU 2               ; Next char is the first arg of the = command
 console_esc_mode_arg_2:      EQU 3               ; Next char is the second arg of the = command
-console_esc_equal_first_arg:   EQU 0xfe6d          ; First arg of the esc= command
+console_esc_equal_first_arg: EQU 0xfe6d          ; First arg of the esc= command
 console_cursor_position:     EQU 0xfe6e          ; 2 bytes
 
 ; On greek mode, the char is converted to a control char that is printed as a greek letter
@@ -145,17 +157,17 @@ console_alphabet_greek_mask: EQU 0x1f
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Entry points of code relocated to upper RAM
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-disk_params_destination:    EQU 0xfe71
-disk_params_drive_a:        EQU 0xfe71
-disk_params_drive_b:        EQU 0xfe82
+disk_params_destination:     EQU 0xfe71
+disk_params_drive_a:         EQU 0xfe71
+disk_params_drive_b:         EQU 0xfe82
 
-relocation_destination:     EQU 0xfecd
-relocation_offset:          EQU 0xfecd - 0x04a8  ; relocation_destination - block_to_relocate
-read_in_DMA_relocated:      EQU 0xfedc           ; reloc_read_in_DMA + relocation_offset
-move_RAM_relocated:         EQU 0xfecd           ; reloc_move_RAM + relocation_offset
-read_to_upper_relocated:    EQU 0xfee3           ; reloc_read_to_upper + relocation_offset
-write_from_upper_relocated: EQU 0xfef4           ; reloc_write_from_upper + relocation_offset
-write_to_DMA_relocated:     EQU 0xfeed           ; reloc_write_to_DMA + relocation_offset
+relocation_destination:      EQU 0xfecd
+relocation_offset:           EQU 0xfecd - 0x04a8  ; relocation_destination - block_to_relocate
+read_in_DMA_relocated:       EQU 0xfedc           ; reloc_read_in_DMA + relocation_offset
+move_RAM_relocated:          EQU 0xfecd           ; reloc_move_RAM + relocation_offset
+read_to_buffer_relocated:    EQU 0xfee3           ; reloc_read_to_buffer + relocation_offset
+write_from_buffer_relocated: EQU 0xfef4           ; reloc_write_from_buffer + relocation_offset
+write_to_DMA_relocated:      EQU 0xfeed           ; reloc_write_to_DMA + relocation_offset
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -337,8 +349,8 @@ init_upper_RAM:
 
     ; Init some variables
     XOR A
-    LD (DAT_ram_fc09), A
-    LD (DAT_ram_fc0b), A
+    LD (DAT_ram_fc09), A ; = 0
+    LD (DAT_ram_fc0b), A ; = 0
     LD A, disk_density_simple
     LD (disk_density), A
     LD A, disk_active_track_undefined
@@ -354,195 +366,249 @@ init_upper_RAM:
 set_drive_for_next_access:
     ; C: disk number
     LD A,C
-    LD (ram_fc00_drive_for_next_access),A
-    JP fdc_set_drive
+    LD (ram_fc00_drive_for_next_access), A
+    JP init_drive
 
 set_sector_for_next_access:
     ; BC: sector number
     LD A,C
-    LD (ram_fc03_sector_for_next_access),A
-    ; For double density, send the sector to the controller
-    LD A,(disk_density)
+    LD (ram_fc03_sector_for_next_access), A
+    ; Id the disk double density?
+    LD A, (disk_density)
     OR A
-    JP NZ,fdc_set_sector
+    ; Yes, send the sector to the controller
+    JP NZ, set_sector_in_fdc
+    ; No
     RET
 
 set_DMA_address_for_next_access:
     ; BC: DMA address
-    LD (disk_DMA_address),BC
+    LD (disk_DMA_address), BC
     RET
 
 set_track_for_next_access:
     ; C: track number
-    LD (ram_fc01_track_for_next_access),BC
+    LD (ram_fc01_track_for_next_access), BC
     ; For double density, seek the track
-    LD A,(disk_density)
+    LD A, (disk_density)
+    ; Id the disk double density?
     OR A
-    JP NZ,fdc_seek_track
+    ; Yes, send the track to the controller
+    JP NZ, seek_track
+    ; No
     RET
 
 fdc_restore_and_mem:
     ;Is disk double density?
     LD A, (disk_density)
     OR A
-    ; Yes, restore and done
-    JP NZ, fdc_seek_track_0
+    ; Yes, go to track 0 and return
+    JP NZ, seek_track_0
     ; No.
-    ; Is fc0a¿? different to 0?
+    ; Is fc0a different to 0??
     LD A,(DAT_ram_fc0a)
     OR A
-    ; Yes
+    ; Yes, skip update
     JP NZ,skip_update_fc09
-    ; No, update fc09
+    ; No, update fc09 ??
     LD (DAT_ram_fc09),A
 skip_update_fc09:
-    JP fdc_seek_track_0
+    JP seek_track_0
 
 read_sector:
+    ; Is disk double density?
     LD A,(disk_density)
     OR A
+    ; Yes, go directly to the read routine
     JP NZ,read_in_DMA_relocated
+    ; No, some preparation is needed as the calls to set_sector_for_next_access
+    ; and set_track_for_next_access do not send the info to the fdc on simple density 
     XOR A
-    LD (DAT_ram_fc0b),A
+    ; Init variables
+    LD (DAT_ram_fc0b),A ; = 0
     LD A,0x1
-    LD (DAT_ram_fc12),A
-    LD (DAT_ram_fc11),A
+    LD (DAT_ram_fc12),A ; = 1
+    LD (DAT_ram_fc11),A ; = 1
     LD A,0x2
-    LD (DAT_ram_fc13),A
-    JP LAB_ram_0279
+    LD (DAT_ram_fc13),A ; = 2
+    JP read_write_sector_cont
 
 write_sector:
+    ; C is used, meaning?
+    ; Is disk double density?
     LD A,(disk_density)
     OR A
+    ; Yes, go directly to the write routine
     JP NZ,write_to_DMA_relocated
+    ; No, some preparation is needed as the calls to set_sector_for_next_access
+    ; and set_track_for_next_access do not send the info to the fdc on simple density 
     XOR A
-    LD (DAT_ram_fc12),A
+    LD (DAT_ram_fc12),A ; = 0
     LD A,C
-    LD (DAT_ram_fc13),A
+    LD (DAT_ram_fc13),A ; = C
     CP 0x2
-    JP NZ,LAB_ram_0232
+    JP NZ, write_sector_skip_DTS_copy
     LD A,0x8
-    LD (DAT_ram_fc0b),A
+    LD (DAT_ram_fc0b),A ; = 8
+    ; Copy the D-T-S requested to work variables
     LD A,(ram_fc00_drive_for_next_access)
-    LD (DAT_ram_fc0c),A
+    LD (DAT_ram_fc0c_drive),A
     LD HL,(ram_fc01_track_for_next_access)
-    LD (DAT_ram_fc0d),HL
+    LD (DAT_ram_fc0d_track),HL
     LD A,(ram_fc03_sector_for_next_access)
-    LD (DAT_ram_fc0f),A
-LAB_ram_0232:
+    LD (DAT_ram_fc0f_sector),A
+write_sector_skip_DTS_copy:
+    ; Is fc0b = 0? WHY?
     LD A,(DAT_ram_fc0b)
     OR A
-    JP Z,LAB_ram_0271
+    ; Yes, the xxx is zero
+    JP Z, write_sector_skip_sector_increase
+    ; No
     DEC A
-    LD (DAT_ram_fc0b),A
+    LD (DAT_ram_fc0b),A ; --
+    ; Is drive requested different to the ¿internal? ?
     LD A,(ram_fc00_drive_for_next_access)
-    LD HL,0xfc0c
+    LD HL,DAT_ram_fc0c_drive
     CP (HL)
-    JP NZ,LAB_ram_0271
-    LD HL,0xfc0d
-    CALL FUN_ram_0311
-    JP NZ,LAB_ram_0271
+    ; Yes, the drive is different
+    JP NZ, write_sector_skip_sector_increase
+    ; Is track requested different to the ¿internal? ?
+    LD HL,DAT_ram_fc0d_track
+    CALL is_track_equal_to_track_for_next_access
+    ; Yes, the track is different
+    JP NZ, write_sector_skip_sector_increase
+    ; Is sector requested different to the ¿internal? ?
     LD A,(ram_fc03_sector_for_next_access)
-    LD HL,0xfc0f
+    LD HL,DAT_ram_fc0f_sector
     CP (HL)
-    JP NZ,LAB_ram_0271
+    ; Yes, the sector is different
+    JP NZ, write_sector_skip_sector_increase
+    ; DTS on the ¿internal? variables match the requested DTS
+    ; Advance to the next sector
     INC (HL)
+    ; Are we at the end of the track?
     LD A,(HL)
-    CP 0x28
-    JP C,LAB_ram_026a
+    CP sectors_per_track
+    ; No
+    JP C, write_sector_skip_track_increase
+    ; Yes, increase track and set sector to zero
     LD (HL),0x0
-    LD HL,(DAT_ram_fc0d)
+    LD HL,(DAT_ram_fc0d_track)
     INC HL
-    LD (DAT_ram_fc0d),HL
-LAB_ram_026a:
+    LD (DAT_ram_fc0d_track),HL
+write_sector_skip_track_increase:
     XOR A
-    LD (DAT_ram_fc11),A
-    JP LAB_ram_0279
-LAB_ram_0271:
+    LD (DAT_ram_fc11),A ; = 0
+    JP read_write_sector_cont
+write_sector_skip_sector_increase:
     XOR A
-    LD (DAT_ram_fc0b),A
+    LD (DAT_ram_fc0b),A ; = 0
     INC A
-    LD (DAT_ram_fc11),A
-LAB_ram_0279:
+    LD (DAT_ram_fc11),A ; = 1
+
+read_write_sector_cont:
     XOR A
-    LD (DAT_ram_fc10),A
+    LD (rw_result),A ; = 0
+    ; A = sector / 4
     LD A,(ram_fc03_sector_for_next_access)
     OR A
     RRA
     OR A
     RRA
-    LD (DAT_ram_fc08),A
+    LD (DAT_ram_fc08_sector4),A ; sector / 4
+    ; Is fc09 = 0? and set to 1. WHY??
     LD HL,DAT_ram_fc09
     LD A,(HL)
     LD (HL),0x1
     OR A
-    JP Z,LAB_ram_02b5
+    ; Yes fc09 was zero (and now 1)
+    JP Z,copy_requested_DTS_to_xx
+    ; Is drive requested different to the xx?
     LD A,(ram_fc00_drive_for_next_access)
-    LD HL,0xfc04
+    LD HL, ram_fc04_drive_xx
     CP (HL)
-    JP NZ,LAB_ram_02ae
-    LD HL,0xfc05
-    CALL FUN_ram_0311
-    JP NZ,LAB_ram_02ae
-    LD A,(DAT_ram_fc08)
-    LD HL,0xfc07
+    ; Yes, the drive is different
+    JP NZ, read_write_DTS_different_to_xx
+    ; Is track requested different to the xx?
+    LD HL, ram_fc05_track_xx
+    CALL is_track_equal_to_track_for_next_access
+    ; Yes, the track is different
+    JP NZ, read_write_DTS_different_to_xx
+    ; Is sector requested equals to the xx?
+    LD A, (DAT_ram_fc08_sector4)
+    LD HL, ram_fc07_sector4_xx
     CP (HL)
-    JP Z,LAB_ram_02d2
-LAB_ram_02ae:
+    ; Yes, the sector is equal
+    JP Z, read_write_DTS_equals_to_xx
+read_write_DTS_different_to_xx:
+    ; Is fc0a not zero? WHY?
     LD A,(DAT_ram_fc0a)
     OR A
-    CALL NZ,read_sector_yy
-LAB_ram_02b5:
+    ; Yes, read/write the fc0c is not zero
+    CALL NZ, read_write_sector_internal
+    ; Now we need to init the xx variables
+copy_requested_DTS_to_xx:
+    ; copy DTS
     LD A,(ram_fc00_drive_for_next_access)
     LD (ram_fc04_drive_xx),A
     LD HL,(ram_fc01_track_for_next_access)
     LD (ram_fc05_track_xx),HL
-    LD A,(DAT_ram_fc08)
-    LD (ram_fc07_sector_xx),A
+    LD A,(DAT_ram_fc08_sector4)
+    LD (ram_fc07_sector4_xx),A
+    ; Is fc11 not zero? WHY?
     LD A,(DAT_ram_fc11)
     OR A
+    ; Not zero
     CALL NZ,read_sector_xx
+    ; Is zero
     XOR A
-    LD (DAT_ram_fc0a),A
-LAB_ram_02d2:
+    LD (DAT_ram_fc0a),A ; = 0
+read_write_DTS_equals_to_xx:
+    ; Calculate the sector buffer to use for this sector   
     LD A,(ram_fc03_sector_for_next_access)
-    AND 0x3
+    AND 0x3 ; mod 4
     LD L,A
     LD H,0x0
-    ADD HL,HL
-    ADD HL,HL
-    ADD HL,HL
-    ADD HL,HL
-    ADD HL,HL
-    ADD HL,HL
-    ADD HL,HL
-    LD DE,0xfc16
+    ADD HL,HL ; *2
+    ADD HL,HL ; *2
+    ADD HL,HL ; *2
+    ADD HL,HL ; *2
+    ADD HL,HL ; *2
+    ADD HL,HL ; *2
+    ADD HL,HL ; *2. Combined *128
+    LD DE, sector_buffer_0
     ADD HL,DE
+    ; HL = 0xfc16 + /sector mod 4) * sector_size
     LD DE,(disk_DMA_address)
-    LD BC,0x80
+    LD BC,sector_size
     LD A,(DAT_ram_fc12)
     OR A
     JR NZ,LAB_ram_02f8
     LD A,0x1
-    LD (DAT_ram_fc0a),A
+    LD (DAT_ram_fc0a),A ; = 1
     EX DE,HL
 LAB_ram_02f8:
+    ; Copy a sector from the buffer to the DMA
     CALL move_RAM_relocated
     LD A,(DAT_ram_fc13)
     CP 0x1
-    LD A,(DAT_ram_fc10)
+    LD A,(rw_result)
+    ; Return if fc13 is not zero
     RET NZ
     OR A
+    ; Return if last read/write had an error
     RET NZ
     XOR A
-    LD (DAT_ram_fc0a),A
-    CALL read_sector_yy
-    LD A,(DAT_ram_fc10)
+    LD (DAT_ram_fc0a),A ; = 0
+    CALL read_write_sector_internal
+    LD A,(rw_result)
     RET
-FUN_ram_0311:
+
+is_track_equal_to_track_for_next_access:
+    ; HL = address to a variable with the track
     EX DE,HL
-    LD HL,0xfc01
-    LD A,(DE)
+    LD HL, ram_fc01_track_for_next_access
+    LD A,(DE) ; = track
     CP (HL)
     RET NZ
     INC DE
@@ -551,8 +617,8 @@ FUN_ram_0311:
     CP (HL)
     RET
     
-fdc_set_drive:
-    ; Change current drived, update the disk info and check density
+init_drive:
+    ; Change current drive, update the disk info and check density
     ; C: drive number 
     LD HL,0x0
     LD A,C
@@ -696,29 +762,31 @@ set_drive_end:
 
 fdc_read_address:
     ; FDC read address command
-    LD A, dfc_command_read_address
-    OUT (io_10_fdc_command_status),A
+    LD A, fdc_command_read_address
+    OUT (io_10_fdc_command), A
     CALL fdc_halt
     ; Is record not found?
-    BIT dfc_status_record_not_found_bit, A
+    BIT fdc_status_record_not_found_bit, A
     RET
 
-fdc_seek_track_0:
+seek_track_0:
     CALL fdc_ensure_ready
     ; Restore controller
-    LD A, fec_command_restore
-    OUT (io_10_fdc_command_status), A
+    LD A, fdc_command_restore
+    OUT (io_10_fdc_command), A
     JR fdc_halt
 
-fdc_seek_track:
+seek_track:
+    ; C: track number
     CALL fdc_ensure_ready
     LD A,C
+    ; Request seek track C
     OUT (io_13_fdc_data),A
     LD A, fdc_command_seek
-    OUT (io_10_fdc_command_status),A
+    OUT (io_10_fdc_command),A
     JR fdc_halt
 
-fdc_set_sector:
+set_sector_in_fdc:
     ; C = sector
     LD A,C
     OUT (io_12_fdc_sector),A
@@ -742,14 +810,15 @@ fdc_ensure_ready:
     PUSH DE
     PUSH BC
     LD A, fdc_command_force_interrupt
-    OUT (io_10_fdc_command_status),A
+    OUT (io_10_fdc_command),A
     CALL turn_on_motor
     LD A,(disk_active_drive)
     LD E,A
+    ; Clear drive select bits
     IN A,(io_1c_system_bits)
-    AND ~(system_bit_drive_a_mask|system_bit_drive_b_mask) ; Clear drive select bits
+    AND ~(system_bit_drive_a_mask|system_bit_drive_b_mask)
     OR E
-    INC A                                          ; disk A(0) to mask 0x1, disk B(1) to mask 0x2
+    INC A ; disk A(0) to mask 0x1, disk B(1) to mask 0x2
     ; Reflect the disk density variable on the system bits.
     AND ~system_bit_double_density_mask
     LD HL,disk_density
@@ -789,7 +858,8 @@ wait_b_inner_loop:
     LD A,D
     OR E
     JP NZ,wait_b_inner_loop
-    DJNZ wait_b                                  ; Do wait_b again with B-1
+    ; Do wait_b again with B-1
+    DJNZ wait_b
     RET
 
 fdc_halt:
@@ -797,12 +867,12 @@ fdc_halt:
     ; is just a RET that will stop the HALT and execute the next instruction.
     HALT
 wait_while_busy:
-    IN A,(io_10_fdc_command_status)
-    BIT 0x0,A
+    IN A,(io_10_fdc_status)
+    BIT fdc_status_record_busy_bit, A
     JR NZ,wait_while_busy
     RET
 
-read_sector_yy:
+read_write_sector_internal:
     LD L,0x3
 LAB_ram_043b:
     LD DE,0x040f
@@ -810,7 +880,7 @@ LAB_ram_043e:
     PUSH HL
     PUSH DE
     CALL go_to_track_sector
-    CALL write_from_upper_relocated
+    CALL write_from_buffer_relocated
     POP DE
     POP HL
     JR Z,LAB_ram_0457
@@ -818,13 +888,13 @@ LAB_ram_043e:
     JR NZ,LAB_ram_043e
     DEC D
     JR Z,LAB_ram_046c
-    CALL fdc_seek_track_0
+    CALL seek_track_0
     LD E,0xf
     JR LAB_ram_043e
 LAB_ram_0457:
     LD B,0x0
     LD A,0x88
-    OUT (io_10_fdc_command_status),A
+    OUT (io_10_fdc_command),A
 LAB_ram_045d:
     HALT
     IN A,(io_13_fdc_data)
@@ -836,7 +906,7 @@ LAB_ram_0462:
     CALL fdc_halt
     AND 0x9c
 LAB_ram_046c:
-    LD (DAT_ram_fc10),A
+    LD (rw_result),A
     RET Z
     DEC L
     JR NZ,LAB_ram_043b
@@ -847,26 +917,27 @@ read_sector_xx:
 LAB_ram_047a:
     PUSH DE
     CALL go_to_track_sector
-    CALL read_to_upper_relocated
-    LD (DAT_ram_fc10),A
+    CALL read_to_buffer_relocated
+    LD (rw_result),A
     POP DE
     RET Z
     DEC E
     JR NZ,LAB_ram_047a
     DEC D
     RET Z
-    CALL fdc_seek_track_0
+    CALL seek_track_0
     LD E,0xf
     JR LAB_ram_047a
+    
 go_to_track_sector:
     LD A,(ram_fc04_drive_xx)
     LD C,A
-    CALL fdc_set_drive
+    CALL init_drive
     LD BC,(ram_fc05_track_xx)
-    CALL fdc_seek_track
-    LD A,(ram_fc07_sector_xx)
+    CALL seek_track
+    LD A,(ram_fc07_sector4_xx)
     LD C,A
-    CALL fdc_set_sector
+    CALL set_sector_in_fdc
     RET
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -886,25 +957,28 @@ reloc_move_RAM:
     SET system_bit_bank,A
     OUT (io_1c_system_bits),A
     RET
+
 reloc_read_in_DMA:
     LD HL,(disk_DMA_address)
     LD B,0x1
     JR reloc_read_internal
-reloc_read_to_upper:
-    LD HL,0xfc16
+reloc_read_to_buffer:
+    LD HL, sector_buffer_0
     LD B,0x4
 reloc_read_internal:
     LD DE,0x9c88
     JR reloc_RW_internal
+
 reloc_write_to_DMA:
     LD HL,(disk_DMA_address)
     LD B,0x1
     JR reloc_write_internal
-reloc_write_from_upper:
-    LD HL,0xfc16
+reloc_write_from_buffer:
+    LD HL, sector_buffer_0
     LD B,0x4
 reloc_write_internal:
     LD DE,0xfcac
+
 reloc_RW_internal:
     CALL fdc_ensure_ready
     DI
@@ -933,7 +1007,7 @@ LAB_ram_04f4:
     LD A,E
     CP 0xac
     JR Z,reloc_write_sector
-    OUT (io_10_fdc_command_status),A
+    OUT (io_10_fdc_command),A
     POP AF
     JR Z,reloc_read_second_half_of_sector
 reloc_read_first_half_of_sector:
@@ -946,7 +1020,7 @@ reloc_read_second_half_of_sector:
     JR NZ,reloc_read_second_half_of_sector
     JR read_sector_completed
 reloc_write_sector:
-    OUT (io_10_fdc_command_status),A
+    OUT (io_10_fdc_command),A
     POP AF
     JR Z,reloc_write_second_half_of_sector
 reloc_write_first_half_of_sector:
@@ -969,7 +1043,7 @@ read_sector_completed:
     ; Wait for the disk access result code
     CALL fdc_halt
     ; Return the result code: 0 or 1
-    AND D
+    AND D ; = fc ??
     RET Z
     LD A,0x1
     RET
