@@ -31,23 +31,23 @@ io_1c_system_bits:        EQU 0x1c
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; System bits
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-system_bit_drive_a:               EQU 0
-system_bit_drive_b:               EQU 1
-system_bit_unused:                EQU 2
-system_bit_centronicsReady:       EQU 3
-system_bit_centronicsStrobe:      EQU 4
-system_bit_double_density:        EQU 5
-system_bit_motors:                EQU 6
-system_bit_bank:                  EQU 7
+system_bit_drive_a:                 EQU 0
+system_bit_drive_b:                 EQU 1
+system_bit_unused:                  EQU 2
+system_bit_centronicsReady:         EQU 3
+system_bit_centronicsStrobe:        EQU 4
+system_bit_double_density_neg:      EQU 5
+system_bit_motors:                  EQU 6
+system_bit_bank:                    EQU 7
 
-system_bit_drive_a_mask:          EQU 0x01
-system_bit_drive_b_mask:          EQU 0x02
-system_bit_unused_mask:           EQU 0x04
-system_bit_centronicsReady_mask:  EQU 0x08
-system_bit_centronicsStrobe_mask: EQU 0x10
-system_bit_double_density_mask:   EQU 0x20
-system_bit_motors_mask:           EQU 0x40
-system_bit_bank_mask:             EQU 0x80
+system_bit_drive_a_mask:            EQU 0x01
+system_bit_drive_b_mask:            EQU 0x02
+system_bit_unused_mask:             EQU 0x04
+system_bit_centronicsReady_mask:    EQU 0x08
+system_bit_centronicsStrobe_mask:   EQU 0x10
+system_bit_double_density_neg_mask: EQU 0x20
+system_bit_motors_mask:             EQU 0x40
+system_bit_bank_mask:               EQU 0x80
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -78,8 +78,8 @@ fdc_command_read_sector:         EQU 0x88
 fdc_command_write_sector:        EQU 0xac
 fdc_command_force_interrupt:     EQU 0xd0
 
-rw_mode_dma:    EQU 1 ; We read or write ¿128? bytes
-rw_mode_buffer: EQU 4 ; We read or write the full 512 bytes buffer
+rw_mode_single_density: EQU 1 ; We read or write 128 bytes directly to/from DMA
+rw_mode_double_density: EQU 4 ; We read or write the full 512 bytes buffer
 
 
 fdc_status_record_busy_bit:      EQU 0
@@ -106,8 +106,8 @@ count_of_boot_sectors_needed:  EQU 0xfa06
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; D-T-S with the requested data.
-; For double density disks the fdc (flopddy disk constroller) is given the info.
-; For simple density disks the info is just stored here
+; For single density disks the fdc (flopddy disk constroller) is given the info.
+; For double density disks the info is just stored here
 ram_fc00_drive_for_next_access:  EQU 0xfc00
 ram_fc01_track_for_next_access:  EQU 0xfc01 ; 2 bytes
 ram_fc03_sector_for_next_access: EQU 0xfc03
@@ -121,7 +121,7 @@ DAT_ram_fc09:                    EQU 0xfc09 ; 2 bytes
 DAT_ram_fc0a:                    EQU 0xfc0a
 DAT_ram_fc0b:                    EQU 0xfc0b
 
-; Copy of the xx_for_next access on some simple density writes
+; Copy of the xx_for_next access on some double density writes
 DAT_ram_fc0c_drive:              EQU 0xfc0c
 DAT_ram_fc0d_track:              EQU 0xfc0d ; 2 bytes
 DAT_ram_fc0f_sector:             EQU 0xfc0f
@@ -140,8 +140,8 @@ sector_buffer_3:                EQU 0xfc16 + sector_size * 3
 
 disk_active_drive:              EQU 0xfe16
 disk_density:                   EQU 0xfe17
-disk_density_simple:            EQU 0x00
-disk_density_double:            EQU 0x20
+disk_density_double:            EQU 0x00 ; FM encoding
+disk_density_single:            EQU 0x20 ; MFM encoding
 disk_active_track_drive_a:      EQU 0xfe18
 disk_active_track_drive_b:      EQU 0xfe19
 disk_active_track_undefined:    EQU 0xff
@@ -173,11 +173,11 @@ disk_params_drive_b:         EQU 0xfe82
 
 relocation_destination:      EQU 0xfecd
 relocation_offset:           EQU 0xfecd - 0x04a8  ; relocation_destination - block_to_relocate
-read_in_DMA_relocated:       EQU 0xfedc           ; reloc_read_in_DMA + relocation_offset
+read_single_density_relocated:       EQU 0xfedc           ; reloc_single_density + relocation_offset
 move_RAM_relocated:          EQU 0xfecd           ; reloc_move_RAM + relocation_offset
 read_to_buffer_relocated:    EQU 0xfee3           ; reloc_read_to_buffer + relocation_offset
 write_from_buffer_relocated: EQU 0xfef4           ; reloc_write_from_buffer + relocation_offset
-write_from_DMA_relocated:      EQU 0xfeed         ; reloc_write_from_DMA + relocation_offset
+write_single_density_relocated:      EQU 0xfeed         ; reloc_write_single_density + relocation_offset
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -361,7 +361,7 @@ init_upper_RAM:
     XOR A
     LD (DAT_ram_fc09), A ; = 0
     LD (DAT_ram_fc0b), A ; = 0
-    LD A, disk_density_simple
+    LD A, disk_density_double
     LD (disk_density), A
     LD A, disk_active_track_undefined
     LD (disk_active_drive), A
@@ -383,12 +383,12 @@ set_sector_for_next_access:
     ; BC: sector number
     LD A,C
     LD (ram_fc03_sector_for_next_access), A
-    ; Id the disk double density?
+    ; Is the disk double density?
     LD A, (disk_density)
     OR A
-    ; Yes, send the sector to the controller
+    ; No, send the sector to the controller
     JP NZ, set_sector_in_fdc
-    ; No
+    ; Yes, we just store the sector number
     RET
 
 set_DMA_address_for_next_access:
@@ -399,22 +399,21 @@ set_DMA_address_for_next_access:
 set_track_for_next_access:
     ; C: track number
     LD (ram_fc01_track_for_next_access), BC
-    ; For double density, seek the track
+    ; Is the disk double density?
     LD A, (disk_density)
-    ; Id the disk double density?
     OR A
-    ; Yes, send the track to the controller
+    ; No, send the track to the controller
     JP NZ, seek_track
-    ; No
+    ; Yes, we just store the track number
     RET
 
 fdc_restore_and_mem:
-    ;Is disk double density?
+    ;Is the disk double density?
     LD A, (disk_density)
     OR A
-    ; Yes, go to track 0 and return
+    ; No, go to track 0 and return
     JP NZ, seek_track_0
-    ; No.
+    ; Yes.
     ; Is fc0a different to 0??
     LD A,(DAT_ram_fc0a)
     OR A
@@ -429,10 +428,10 @@ read_sector:
     ; Is disk double density?
     LD A,(disk_density)
     OR A
-    ; Yes, go directly to the read routine
-    JP NZ,read_in_DMA_relocated
-    ; No, some preparation is needed as the calls to set_sector_for_next_access
-    ; and set_track_for_next_access do not send the info to the fdc on simple density 
+    ; No, go directly to the read routine
+    JP NZ,read_single_density_relocated
+    ; Yes, some preparation is needed as the calls to set_sector_for_next_access
+    ; and set_track_for_next_access do not send the info to the fdc on double density 
     XOR A
     ; Init variables
     LD (DAT_ram_fc0b),A ; = 0
@@ -448,10 +447,10 @@ write_sector:
     ; Is disk double density?
     LD A,(disk_density)
     OR A
-    ; Yes, go directly to the write routine
-    JP NZ, write_from_DMA_relocated
-    ; No, some preparation is needed as the calls to set_sector_for_next_access
-    ; and set_track_for_next_access do not send the info to the fdc on simple density 
+    ; No, go directly to the write routine
+    JP NZ, write_single_density_relocated
+    ; Yes, some preparation is needed as the calls to set_sector_for_next_access
+    ; and set_track_for_next_access do not send the info to the fdc on double density 
     XOR A
     LD (DAT_ram_fc12),A ; = 0
     LD A,C
@@ -652,7 +651,7 @@ disk_params_skip_for_drive_a:
     LD (disk_active_drive),A
     OR A
     ; Set the read_address_state to the disk param $10
-    ; it will be disk_density_simple
+    ; The param default is disk_density_double
     PUSH HL
     LD DE,0x10
     ADD HL,DE
@@ -692,28 +691,29 @@ skip_for_drive_a:
     ; Yes
     CALL fdc_ensure_ready
     CALL fdc_restore_and_mem
-    ; Disable double density
-    IN A,(io_1c_system_bits)
-    AND ~system_bit_double_density_mask          
-    OR 0x0
-    OUT (io_1c_system_bits),A
-    ; Can we read the address in simple density?
-    CALL fdc_read_address
-    ; Yes
-    JR Z, simple_density_disk
-    ; No, retry with double density
     ; Enable double density
     IN A,(io_1c_system_bits)
-    AND ~system_bit_double_density_mask
-    OR system_bit_double_density_mask
+    AND ~system_bit_double_density_neg_mask          
+    OR 0x0
+    OUT (io_1c_system_bits),A
+    ; Can we read the address in double density?
+    CALL fdc_read_address
+    ; Yes
+    JR Z, set_double_density_disk
+    ; No, retry with single density
+    ; Disbable double density
+    IN A,(io_1c_system_bits)
+    AND ~system_bit_double_density_neg_mask
+    OR system_bit_double_density_neg_mask
     OUT (io_1c_system_bits),A
     ; Can we read the address?
     CALL fdc_read_address
     ; No, there is nothing we can do
     RET NZ
     ; Yes
-    JR double_density_disk
-simple_density_disk:
+    JR set_single_density_disk
+
+set_double_density_disk:
     ; HL is disk_params_drive_x
     PUSH HL
     PUSH DE
@@ -729,15 +729,16 @@ simple_density_disk:
     LD (HL),E
     INC HL
     LD (HL),D
-    ; Set disk_density_simple in the disk param $10
+    ; Set disk_density_double in the disk param $10
     LD DE,0x0005
     ADD HL,DE
-    LD A, disk_density_simple
+    LD A, disk_density_double
     LD (HL),A
     ; Store the current disk density
     LD (disk_density),A
     JR set_drive_end
-double_density_disk:
+
+set_single_density_disk:
     ; HL is disk_params_drive_x
     PUSH HL
     PUSH DE
@@ -753,13 +754,14 @@ double_density_disk:
     LD (HL),E
     INC HL
     LD (HL),D
-    ; Set disk_density_double in the disk param $10
+    ; Set disk_density_single in the disk param $10
     LD DE,0x0005
     ADD HL,DE
-    LD A, disk_density_double
+    LD A, disk_density_single
     LD (HL),A
     ; Store the current disk density
     LD (disk_density),A
+
 set_drive_end:
     POP DE ; DE is disk_active_track_drive_a
     POP HL ; HL is disk_params_drive_x
@@ -830,7 +832,7 @@ fdc_ensure_ready:
     OR E
     INC A ; disk A(0) to mask 0x1, disk B(1) to mask 0x2
     ; Reflect the disk density variable on the system bits.
-    AND ~system_bit_double_density_mask
+    AND ~system_bit_double_density_neg_mask
     LD HL,disk_density
     OR (HL)
     OUT (io_1c_system_bits),A
@@ -977,29 +979,29 @@ reloc_move_RAM:
     OUT (io_1c_system_bits),A
     RET
 
-reloc_read_in_DMA:
+reloc_read_single_density:
     ; Read 128 bytes into DMA
     LD HL,(disk_DMA_address)
-    LD B, rw_mode_dma
+    LD B, rw_mode_single_density
     JR reloc_read_internal
 reloc_read_to_buffer:
     ; Read 512 bytes into buffer
     LD HL, sector_buffer_0
-    LD B, rw_mode_buffer
+    LD B, rw_mode_double_density
 reloc_read_internal:
     ; Configure RW for read
     LD DE, fdc_status_read_error_bitmask * 0x100 + fdc_command_read_sector
     JR reloc_RW_internal
 
-reloc_write_from_DMA:
+reloc_write_single_density:
     ; Write 128 bytes from DMA
     LD HL,(disk_DMA_address)
-    LD B, rw_mode_dma
+    LD B, rw_mode_single_density
     JR reloc_write_internal
 reloc_write_from_buffer:
     ; Write 512 bytes from buffer
     LD HL, sector_buffer_0
-    LD B, rw_mode_buffer
+    LD B, rw_mode_double_density
 reloc_write_internal:
     ; Configure RW for write
     LD DE, fdc_status_write_error_bitmask * 0x100 + fdc_command_write_sector
@@ -1026,11 +1028,11 @@ reloc_RW_internal:
     LD BC, sector_size * 0x100 + io_13_fdc_data  ; Setup of the INI command
     BIT 0x0,A 
     JR NZ, read_rw_internal_cont
-    ; for rw_mode_nuffer let's set B to zero
+    ; For rw_mode_double_density let's set B to zero
     LD B,0x0
 read_rw_internal_cont:
-    ; Is mode DMA?
-    CP rw_mode_dma
+    ; Is mode single density ?
+    CP rw_mode_single_density
     PUSH AF
     LD A,E
     ; Is the command a write?
@@ -1040,14 +1042,14 @@ read_rw_internal_cont:
     ; No, let's read
     OUT (io_10_fdc_command),A
     POP AF
-    ; if the mode is DMA, let's read the 128 bytes
+    ; If the mode is single density, let's read the 128 bytes
     JR Z, reloc_read_the_rest
 reloc_read_first_256_bytes:
     HALT
     INI ; IN from io_13_fdc_data
     JR NZ, reloc_read_first_256_bytes
 reloc_read_the_rest:
-    ; The rest will be 256 bytes on buffer mode and 128 bytes in DMA mode
+    ; The rest will be 256 bytes on buffer mode and 128 bytes in single density mode
     HALT
     INI ; IN from io_13_fdc_data
     JR NZ, reloc_read_the_rest
@@ -1057,14 +1059,14 @@ reloc_read_the_rest:
 reloc_write_sector:
     OUT (io_10_fdc_command),A ; A = fdc_command_write_sector
     POP AF
-    ; if the mode is DMA, let's write the 128 bytes
+    ; if the mode is single density, let's write the 128 bytes
     JR Z, reloc_write_the_rest
 reloc_write_first_256_bytes:
     HALT
     OUTI ; OUT to io_13_fdc_data
     JR NZ,reloc_write_first_256_bytes
 reloc_write_the_rest:
-    ; The rest will be 256 bytes on buffer mode and 128 bytes in DMA mode
+    ; The rest will be 256 bytes on buffer mode and 128 bytes in single density mode
     HALT
     OUTI ; OUT to io_13_fdc_data
     JR NZ, reloc_write_the_rest
