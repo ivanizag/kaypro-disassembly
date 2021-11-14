@@ -1,20 +1,34 @@
 # File bios.s
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; Analysis of the Kaypro II ROM 
 0000			; 
 0000			; Based on 81-149c.rom 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; NOTES ON DISK FORMAT 
+0000			; 
+0000			;   From the code it looks like there is support for single density 
+0000			; and double density disks. FM or MFM encoding respectively. 
+0000			;   The entrypoints interface show sectors as having 128 bytes. 
+0000			;   For single density the sector size is 128 bytes. The code can go 
+0000			; directly to the fdc (floppy disk controller, a WD MD1793). 
+0000			;   For double density the sector size is 512 bytes. To simulate the 
+0000			; smaller sectors the code reads 512 bytes in a buffer and copies 
+0000			; the relevant 128 bytes. To do so, the code is much more complex as 
+0000			; commands can't be sent directly to the fdc. 
+0000			;   Surprsingly, it looks like there was not a Kaypro ever sold with 
+0000			; single density disks.  
+0000			; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			 
-0000			 
-0000			 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; CONSTANTS 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; I/O Ports 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			io_04_serial_data:        EQU 0x04 
 0000			io_05_keyboard_data:      EQU 0x05 
 0000			io_06_serial_control:     EQU 0x06 
@@ -29,9 +43,9 @@
 0000			io_1c_system_bits:        EQU 0x1c 
 0000			 
 0000			 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; System bits 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			system_bit_drive_a:                 EQU 0 
 0000			system_bit_drive_b:                 EQU 1 
 0000			system_bit_unused:                  EQU 2 
@@ -51,9 +65,9 @@
 0000			system_bit_bank_mask:               EQU 0x80 
 0000			 
 0000			 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; Console constants 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			address_vram:        EQU 0x3000 
 0000			console_lines:       EQU 24 
 0000			console_columns:     EQU 80 
@@ -64,11 +78,11 @@
 0000			address_vram_start_of_last_line: EQU address_vram_end - console_line_length + 1            ; 0x3b80 
 0000			 
 0000			 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; Disk constants 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-0000			sectors_per_track:  EQU 40 ; pysical sectors. CP/M sees only 10 bigger sectors 
-0000			sector_size:	    EQU 128 ; physical sector size. Logical will be 512 for CP/M 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			sector_size:	    EQU 128 ; See NOTES 
+0000			sectors_per_track:  EQU 40 ; See NOTES 
 0000			disk_count:         EQU 2 ; 0 is A: and 1 is B: 
 0000			read_write_retries: EQU 3 
 0000			 
@@ -92,19 +106,19 @@
 0000			RET_opcode:	       EQU 0xC9 
 0000			 
 0000			 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; The first boot sector has the info about 
 0000			; the rest of the boot sector loading 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			first_sector_load_address:     EQU 0xfa00 
 0000			address_to_load_second_sector: EQU 0xfa02 
 0000			address_to_exec_boot:          EQU 0xfa04 
 0000			count_of_boot_sectors_needed:  EQU 0xfa06 
 0000			 
 0000			 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; Disk related variables 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			 
 0000			; D-T-S with the requested data. 
 0000			; For single density disks the fdc (flopddy disk constroller) is given the info. 
@@ -148,9 +162,9 @@
 0000			disk_active_track_undefined:    EQU 0xff 
 0000			 
 0000			 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; Console related variables 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			console_esc_mode:            EQU 0xfe6c 
 0000			console_esc_mode_clear:      EQU 0               ; No ESC pending 
 0000			console_esc_mode_enabled:    EQU 1               ; Next char is the ESC command 
@@ -165,9 +179,9 @@
 0000			console_alphabet_greek_mask: EQU 0x1f 
 0000			 
 0000			 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; Entry points of code relocated to upper RAM 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			disk_params_destination:     EQU 0xfe71 
 0000			disk_params_drive_a:         EQU 0xfe71 
 0000			disk_params_drive_b:         EQU 0xfe82 
@@ -181,17 +195,36 @@
 0000			write_single_density_relocated:      EQU 0xfeed         ; reloc_write_single_density + relocation_offset 
 0000			 
 0000			 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; BIOS ENTRY POINTS 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; 
+0000			; Description of the entry points adapted from the KayPLUS manual. 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			 
 0000			ORG	0h 
-0000 c3 4b 00		    JP cold_boot 
-0003 c3 86 01		    JP init_upper_RAM 
-0006 c3 05 06		    JP init_screen 
-0009 c3 68 05		    JP init_ports 
-000c c3 d8 01		    JP fdc_restore_and_mem 
-000f c3 b4 01		    JP set_drive_for_next_access 
+0000			    ; COLD: Resets entire computer system and is ALMOST like 
+0000			    ; pressing the RESET button. 
+0000 c3 4b 00		    JP EP_COLD 
+0003			 
+0003			    ; INITDSK: Resets the disk input/output buffer status to empty. 
+0003			    ; Any pending write is lost. Useful to perform a "soft" disk reset. 
+0003 c3 86 01		    JP EP_INITDSK 
+0006			 
+0006			    ; INITVID: Resets the video system. Video hardware is configured 
+0006			    ; and screen is cleared 
+0006 c3 05 06		    JP EP_INITVID 
+0009			 
+0009			    ; INITDEV: Initializes tall I/O ports. 
+0009 c3 68 05		    JP EP_INITDEV 
+000c			 
+000c			    ; HOME: Sets track number to 0 
+000c c3 d8 01		    JP EP_HOME 
+000f			 
+000f			    ; SELDSK: Selects logical drive in register C (value of 0 through 
+000f			    ; 1), corresponding to drives A or B). SELDSK determines what 
+000f			    ; type of disk (density) is present in the drive. 
+000f c3 b4 01		    JP EP_SELDSK 
+0012			 
 0012 c3 cc 01		    JP set_track_for_next_access 
 0015 c3 bb 01		    JP set_sector_for_next_access 
 0018 c3 c7 01		    JP set_DMA_address_for_next_access 
@@ -200,34 +233,38 @@
 0021 c3 e4 03		    JP sector_translation 
 0024 c3 0f 04		    JP turn_on_motor 
 0027 c3 1e 04		    JP turn_off_motor 
+002a			    ; Keyboard 
 002a c3 75 05		    JP is_key_pressed 
 002d c3 7d 05		    JP get_key 
 0030 c3 88 05		    JP keyboard_out 
+0033			    ; Serial 
 0033 c3 cc 05		    JP is_serial_byte_ready 
 0036 c3 d2 05		    JP get_byte_from_serial 
 0039 c3 da 05		    JP serial_out 
+003c			    ; Parallel 
 003c c3 ea 05		    JP lpt_status 
 003f c3 f2 05		    JP lpt_output 
 0042 c3 e4 05		    JP serial_get_control 
+0045			    ; Console 
 0045 c3 1e 06		    JP console_write_c 
+0048			    ; Wait 
 0048 c3 25 04		    JP wait_b 
 004b			 
-004b			 
-004b			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+004b			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 004b			; INITIALIZATION AND BOOT FROM DISK 
-004b			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+004b			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 004b			 
-004b			cold_boot: 
+004b			EP_COLD: 
 004b f3			    DI 
 004c 31 ff ff		    LD SP, 0xffff 
 004f 06 0a		    LD B, 0xa 
 0051 cd 25 04		    CALL wait_b 
 0054			    ; Init the system, io ports, screen and memory 
-0054 cd 68 05		    CALL init_ports 
-0057 cd 05 06		    CALL init_screen 
-005a cd 86 01		    CALL init_upper_RAM 
+0054 cd 68 05		    CALL EP_INITDEV 
+0057 cd 05 06		    CALL EP_INITVID 
+005a cd 86 01		    CALL EP_INITDSK 
 005d			    ; Avoid the NMI entry point at 0x0066 
-005d 18 08		    JR cold_boot_continue                         
+005d 18 08		    JR EP_COLD_continue                         
 005f 3d 00 00 00 00 00 00	    DB 0x3D, 0, 0, 0, 0, 0, 0 
 0066			 
 0066			nmi_isr: 
@@ -235,7 +272,7 @@
 0066			    ; by the floppy controller 
 0066 c9			    RET 
 0067			 
-0067			cold_boot_continue: 
+0067			EP_COLD_continue: 
 0067			    ; Show the wellcome message 
 0067 cd f2 07		    CALL console_write_string                    ; console_write_string uses the zero terminated 
 006a			                                                 ; string after the CALL 
@@ -248,7 +285,7 @@
 00af			 
 00af			    ; Read the first sector of the boot disk 
 00af 0e 00		    LD C,0x0 
-00b1 cd b4 01		    CALL set_drive_for_next_access 
+00b1 cd b4 01		    CALL EP_SELDSK 
 00b4 01 00 00		    LD BC,0x0 
 00b7 cd cc 01		    CALL set_track_for_next_access 
 00ba 0e 00		    LD C,0x0 
@@ -320,9 +357,9 @@
 0132			    ; Lock the CPU forever 
 0132 18 fe		    JR wait_forever 
 0134			 
-0134			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-0134			; COPY CODE AND DATA TO UPPER RAM 
-0134			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0134			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0134			; INIT DISK. COPY CODE AND DATA TO UPPER RAM. RESET VARIABLES 
+0134			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0134			 
 0134			; This data will be copied to 0xfe71 
 0134			disk_params: 
@@ -344,7 +381,7 @@
 017e 0f 02 07 0c 11 04 09 0e	    DB 0x0F, 0x02, 0x07, 0x0C, 0x11, 0x04, 0x09, 0x0E 
 0186			disk_params_end: 
 0186			 
-0186			init_upper_RAM: 
+0186			EP_INITDSK: 
 0186			    ; Copy relocatable disk access to upper RAM to 
 0186			    ; be accessible even when the ROM is swapped out 
 0186 21 a8 04		    LD HL, block_to_relocate 
@@ -370,11 +407,11 @@
 01b0 32 19 fe		    LD (disk_active_track_drive_b), A 
 01b3 c9			    RET 
 01b4			 
-01b4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-01b4			; FLOPPY DISK 
-01b4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+01b4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+01b4			; FLOPPY DISK ENTRY POINTS 
+01b4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 01b4			 
-01b4			set_drive_for_next_access: 
+01b4			EP_SELDSK: 
 01b4			    ; C: disk number 
 01b4 79			    LD A,C 
 01b5 32 00 fc		    LD (ram_fc00_drive_for_next_access), A 
@@ -408,7 +445,7 @@
 01d7			    ; Yes, we just store the track number 
 01d7 c9			    RET 
 01d8			 
-01d8			fdc_restore_and_mem: 
+01d8			EP_HOME: 
 01d8			    ;Is the disk double density? 
 01d8 3a 17 fe		    LD A, (disk_density) 
 01db b7			    OR A 
@@ -516,6 +553,10 @@
 0275 3c			    INC A 
 0276 32 11 fc		    LD (DAT_ram_fc11),A ; = 1 
 0279			 
+0279			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0279			; FLOPPY DISK INTERNAL IMPLEMENTATION READ AND WRITE 
+0279			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0279			     
 0279			read_write_sector_cont: 
 0279 af			    XOR A 
 027a 32 10 fc		    LD (rw_result),A ; = 0 
@@ -626,7 +667,11 @@
 031a 1a			    LD A,(DE) 
 031b be			    CP (HL) 
 031c c9			    RET 
-031d			     
+031d			 
+031d			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+031d			; FLOPPY DISK INTERNAL INIT 
+031d			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+031d			 
 031d			init_drive: 
 031d			    ; Change current drive, update the disk info and check density 
 031d			    ; C: drive number  
@@ -691,7 +736,7 @@
 035d c0			    RET NZ 
 035e			    ; Yes 
 035e cd ef 03		    CALL fdc_ensure_ready 
-0361 cd d8 01		    CALL fdc_restore_and_mem 
+0361 cd d8 01		    CALL EP_HOME 
 0364			    ; Enable double density 
 0364 db 1c		    IN A,(io_1c_system_bits) 
 0366 e6 df		    AND ~system_bit_double_density_neg_mask           
@@ -737,7 +782,7 @@
 0397 77			    LD (HL),A 
 0398			    ; Store the current disk density 
 0398 32 17 fe		    LD (disk_density),A 
-039b 18 1c		    JR set_drive_end 
+039b 18 1c		    JR init_drive_end 
 039d			 
 039d			set_single_density_disk: 
 039d			    ; HL is disk_params_drive_x 
@@ -763,7 +808,7 @@
 03b6			    ; Store the current disk density 
 03b6 32 17 fe		    LD (disk_density),A 
 03b9			 
-03b9			set_drive_end: 
+03b9			init_drive_end: 
 03b9 d1			    POP DE ; DE is disk_active_track_drive_a 
 03ba e1			    POP HL ; HL is disk_params_drive_x 
 03bb			    ; Why set trach with the sector value???? 
@@ -804,6 +849,10 @@
 03e0 79			    LD A,C 
 03e1 d3 12		    OUT (io_12_fdc_sector),A 
 03e3 c9			    RET 
+03e4			 
+03e4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+03e4			; FLOPPY DISK MORE ENTRYPOINTS 
+03e4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 03e4			 
 03e4			sector_translation: 
 03e4 7a			    LD A,D 
@@ -863,6 +912,10 @@
 0422 d3 1c		    OUT (io_1c_system_bits),A 
 0424 c9			    RET 
 0425			 
+0425			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0425			; WAIT 
+0425			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0425			 
 0425			wait_b: 
 0425			    ; wait time in B 
 0425 11 86 06		    LD DE,0x686 
@@ -874,6 +927,10 @@
 042e			    ; Do wait_b again with B-1 
 042e 10 f5		    DJNZ wait_b 
 0430 c9			    RET 
+0431			 
+0431			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0431			; FLOPPY DISK INTERNAL MORE IMPLEMENTATION READ AND WRITE 
+0431			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0431			 
 0431			wait_for_result: 
 0431			    ; The fdc generates a NMI when it requires attention. The NMI handler 
@@ -962,9 +1019,9 @@
 04a4 cd e0 03		    CALL set_sector_in_fdc 
 04a7 c9			    RET 
 04a8			 
-04a8			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+04a8			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 04a8			; CODE RELOCATED TO UPPER RAM 
-04a8			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+04a8			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 04a8			 
 04a8			block_to_relocate: 
 04a8			reloc_move_RAM: 
@@ -1092,10 +1149,9 @@
 052e c9			    RET 
 052f			block_to_relocate_end: 
 052f			 
-052f			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+052f			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 052f			; IO PORTS INITIALIZATION 
-052f			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-052f			 
+052f			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 052f			 
 052f			init_ports_count: 
 052f 1c			    DB 0x1C 
@@ -1129,22 +1185,22 @@
 0562 09 0f		    DW 0x0F09 
 0564 0b 03		    DW 0x030B 
 0566 0b 4f		    DW 0x4F0B 
-0568			init_ports: 
+0568			EP_INITDEV: 
 0568 21 2f 05		    LD HL,init_ports_count 
 056b 46			    LD B,(HL) 
-056c			init_port_loop: 
+056c			init_ports_loop: 
 056c 23			    INC HL 
 056d 4e			    LD C,(HL) 
 056e 23			    INC HL 
 056f 7e			    LD A,(HL) 
 0570			    ; An out for each pair of bytes in init_ports_data 
 0570 ed 79		    OUT (C),A 
-0572 10 f8		    DJNZ init_port_loop 
+0572 10 f8		    DJNZ init_ports_loop 
 0574 c9			    RET 
 0575			 
-0575			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0575			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0575			; KEYBOARD 
-0575			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0575			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0575			 
 0575			is_key_pressed: 
 0575			    ; return 0 or FF in A 
@@ -1196,9 +1252,9 @@
 05c1 87 88 89 8a 8b 8c 8d 8e	    DB 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E 
 05c9 8f 90 91		    DB 0x8F, 0x90, 0x91 
 05cc			 
-05cc			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+05cc			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 05cc			; SERIAL 
-05cc			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+05cc			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 05cc			 
 05cc			is_serial_byte_ready: 
 05cc			    ; return 0 or FF in A 
@@ -1227,9 +1283,9 @@
 05e6 e6 04		    AND 0x4 
 05e8 18 04		    JR force_0_or_ff 
 05ea			 
-05ea			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+05ea			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 05ea			; PARALLEL 
-05ea			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+05ea			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 05ea			 
 05ea			lpt_status: 
 05ea			    ; return 0 or FF in A 
@@ -1255,11 +1311,11 @@
 0602 d3 1c		    OUT (io_1c_system_bits),A 
 0604 c9			    RET 
 0605			 
-0605			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0605			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0605			; CONSOLE OUTPUT 
-0605			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0605			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0605			 
-0605			init_screen: 
+0605			EP_INITVID: 
 0605			    ; Clear stored ESC command argument 
 0605 3e 20		    LD A, ' ' 
 0607 32 6d fe		    LD (console_esc_equal_first_arg),A 
@@ -1317,12 +1373,14 @@
 065c 28 66		    JR Z,console_clear_screen 
 065e fe 1e		    CP 0x1e 
 0660 28 73		    JR Z,console_home_cursor 
-0662 fe 60		    CP 0x60 
-0664 38 04		    JR C,LAB_ram_066a 
+0662			    ; For lowercase chars we may apply a conversion to greek 
+0662			    ; letters.  
+0662 fe 60		    CP 'a'-1 
+0664 38 04		    JR C,skip_greek_conversion 
 0666			    ; Apply the alphabet mask 
 0666 3a 70 fe		    LD A,(console_alphabet_mask) 
 0669 a1			    AND C 
-066a			LAB_ram_066a: 
+066a			skip_greek_conversion: 
 066a			    ; Write the char at the cursor position 
 066a 77			    LD (HL),A 
 066b			    ; Advance the cursor 

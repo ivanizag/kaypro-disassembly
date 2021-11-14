@@ -1,19 +1,33 @@
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Analysis of the Kaypro II ROM
 ;
 ; Based on 81-149c.rom
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; NOTES ON DISK FORMAT
+;
+;   From the code it looks like there is support for single density
+; and double density disks. FM or MFM encoding respectively.
+;   The entrypoints interface show sectors as having 128 bytes.
+;   For single density the sector size is 128 bytes. The code can go
+; directly to the fdc (floppy disk controller, a WD MD1793).
+;   For double density the sector size is 512 bytes. To simulate the
+; smaller sectors the code reads 512 bytes in a buffer and copies
+; the relevant 128 bytes. To do so, the code is much more complex as
+; commands can't be sent directly to the fdc.
+;   Surprsingly, it looks like there was not a Kaypro ever sold with
+; single density disks. 
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; CONSTANTS
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; I/O Ports
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 io_04_serial_data:        EQU 0x04
 io_05_keyboard_data:      EQU 0x05
 io_06_serial_control:     EQU 0x06
@@ -28,9 +42,9 @@ io_14_scroll_register:    EQU 0x14
 io_1c_system_bits:        EQU 0x1c
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; System bits
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 system_bit_drive_a:                 EQU 0
 system_bit_drive_b:                 EQU 1
 system_bit_unused:                  EQU 2
@@ -50,9 +64,9 @@ system_bit_motors_mask:             EQU 0x40
 system_bit_bank_mask:               EQU 0x80
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Console constants
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 address_vram:        EQU 0x3000
 console_lines:       EQU 24
 console_columns:     EQU 80
@@ -63,11 +77,11 @@ address_vram_end:                EQU address_vram + console_lines * console_line
 address_vram_start_of_last_line: EQU address_vram_end - console_line_length + 1            ; 0x3b80
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Disk constants
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-sectors_per_track:  EQU 40 ; pysical sectors. CP/M sees only 10 bigger sectors
-sector_size:	    EQU 128 ; physical sector size. Logical will be 512 for CP/M
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+sector_size:	    EQU 128 ; See NOTES
+sectors_per_track:  EQU 40 ; See NOTES
 disk_count:         EQU 2 ; 0 is A: and 1 is B:
 read_write_retries: EQU 3
 
@@ -91,19 +105,19 @@ fdc_status_write_error_bitmask:  EQU 0xfc ; Not ready, write_protect, write faul
 RET_opcode:	       EQU 0xC9
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; The first boot sector has the info about
 ; the rest of the boot sector loading
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 first_sector_load_address:     EQU 0xfa00
 address_to_load_second_sector: EQU 0xfa02
 address_to_exec_boot:          EQU 0xfa04
 count_of_boot_sectors_needed:  EQU 0xfa06
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Disk related variables
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; D-T-S with the requested data.
 ; For single density disks the fdc (flopddy disk constroller) is given the info.
@@ -147,9 +161,9 @@ disk_active_track_drive_b:      EQU 0xfe19
 disk_active_track_undefined:    EQU 0xff
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Console related variables
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 console_esc_mode:            EQU 0xfe6c
 console_esc_mode_clear:      EQU 0               ; No ESC pending
 console_esc_mode_enabled:    EQU 1               ; Next char is the ESC command
@@ -164,9 +178,9 @@ console_alphabet_ascii_mask: EQU 0x7f
 console_alphabet_greek_mask: EQU 0x1f
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Entry points of code relocated to upper RAM
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 disk_params_destination:     EQU 0xfe71
 disk_params_drive_a:         EQU 0xfe71
 disk_params_drive_b:         EQU 0xfe82
@@ -180,17 +194,36 @@ write_from_buffer_relocated: EQU 0xfef4           ; reloc_write_from_buffer + re
 write_single_density_relocated:      EQU 0xfeed         ; reloc_write_single_density + relocation_offset
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; BIOS ENTRY POINTS
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; Description of the entry points adapted from the KayPLUS manual.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ORG	0h
-    JP cold_boot
-    JP init_upper_RAM
-    JP init_screen
-    JP init_ports
-    JP fdc_restore_and_mem
-    JP set_drive_for_next_access
+    ; COLD: Resets entire computer system and is ALMOST like
+    ; pressing the RESET button.
+    JP EP_COLD
+
+    ; INITDSK: Resets the disk input/output buffer status to empty.
+    ; Any pending write is lost. Useful to perform a "soft" disk reset.
+    JP EP_INITDSK
+
+    ; INITVID: Resets the video system. Video hardware is configured
+    ; and screen is cleared
+    JP EP_INITVID
+
+    ; INITDEV: Initializes tall I/O ports.
+    JP EP_INITDEV
+
+    ; HOME: Sets track number to 0
+    JP EP_HOME
+
+    ; SELDSK: Selects logical drive in register C (value of 0 through
+    ; 1), corresponding to drives A or B). SELDSK determines what
+    ; type of disk (density) is present in the drive.
+    JP EP_SELDSK
+
     JP set_track_for_next_access
     JP set_sector_for_next_access
     JP set_DMA_address_for_next_access
@@ -199,34 +232,38 @@ ORG	0h
     JP sector_translation
     JP turn_on_motor
     JP turn_off_motor
+    ; Keyboard
     JP is_key_pressed
     JP get_key
     JP keyboard_out
+    ; Serial
     JP is_serial_byte_ready
     JP get_byte_from_serial
     JP serial_out
+    ; Parallel
     JP lpt_status
     JP lpt_output
     JP serial_get_control
+    ; Console
     JP console_write_c
+    ; Wait
     JP wait_b
 
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; INITIALIZATION AND BOOT FROM DISK
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-cold_boot:
+EP_COLD:
     DI
     LD SP, 0xffff
     LD B, 0xa
     CALL wait_b
     ; Init the system, io ports, screen and memory
-    CALL init_ports
-    CALL init_screen
-    CALL init_upper_RAM
+    CALL EP_INITDEV
+    CALL EP_INITVID
+    CALL EP_INITDSK
     ; Avoid the NMI entry point at 0x0066
-    JR cold_boot_continue                        
+    JR EP_COLD_continue                        
     DB 0x3D, 0, 0, 0, 0, 0, 0
 
 nmi_isr:
@@ -234,7 +271,7 @@ nmi_isr:
     ; by the floppy controller
     RET
 
-cold_boot_continue:
+EP_COLD_continue:
     ; Show the wellcome message
     CALL console_write_string                    ; console_write_string uses the zero terminated
                                                  ; string after the CALL
@@ -247,7 +284,7 @@ cold_boot_continue:
 
     ; Read the first sector of the boot disk
     LD C,0x0
-    CALL set_drive_for_next_access
+    CALL EP_SELDSK
     LD BC,0x0
     CALL set_track_for_next_access
     LD C,0x0
@@ -319,9 +356,9 @@ wait_forever:
     ; Lock the CPU forever
     JR wait_forever
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; COPY CODE AND DATA TO UPPER RAM
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; INIT DISK. COPY CODE AND DATA TO UPPER RAM. RESET VARIABLES
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; This data will be copied to 0xfe71
 disk_params:
@@ -343,7 +380,7 @@ init_data_rest:
     DB 0x0F, 0x02, 0x07, 0x0C, 0x11, 0x04, 0x09, 0x0E
 disk_params_end:
 
-init_upper_RAM:
+EP_INITDSK:
     ; Copy relocatable disk access to upper RAM to
     ; be accessible even when the ROM is swapped out
     LD HL, block_to_relocate
@@ -369,11 +406,11 @@ init_upper_RAM:
     LD (disk_active_track_drive_b), A
     RET
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; FLOPPY DISK
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; FLOPPY DISK ENTRY POINTS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-set_drive_for_next_access:
+EP_SELDSK:
     ; C: disk number
     LD A,C
     LD (ram_fc00_drive_for_next_access), A
@@ -407,7 +444,7 @@ set_track_for_next_access:
     ; Yes, we just store the track number
     RET
 
-fdc_restore_and_mem:
+EP_HOME:
     ;Is the disk double density?
     LD A, (disk_density)
     OR A
@@ -515,6 +552,10 @@ write_sector_skip_sector_increase:
     INC A
     LD (DAT_ram_fc11),A ; = 1
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; FLOPPY DISK INTERNAL IMPLEMENTATION READ AND WRITE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    
 read_write_sector_cont:
     XOR A
     LD (rw_result),A ; = 0
@@ -625,7 +666,11 @@ is_track_equal_to_track_for_next_access:
     LD A,(DE)
     CP (HL)
     RET
-    
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; FLOPPY DISK INTERNAL INIT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 init_drive:
     ; Change current drive, update the disk info and check density
     ; C: drive number 
@@ -690,7 +735,7 @@ skip_for_drive_a:
     RET NZ
     ; Yes
     CALL fdc_ensure_ready
-    CALL fdc_restore_and_mem
+    CALL EP_HOME
     ; Enable double density
     IN A,(io_1c_system_bits)
     AND ~system_bit_double_density_neg_mask          
@@ -736,7 +781,7 @@ set_double_density_disk:
     LD (HL),A
     ; Store the current disk density
     LD (disk_density),A
-    JR set_drive_end
+    JR init_drive_end
 
 set_single_density_disk:
     ; HL is disk_params_drive_x
@@ -762,7 +807,7 @@ set_single_density_disk:
     ; Store the current disk density
     LD (disk_density),A
 
-set_drive_end:
+init_drive_end:
     POP DE ; DE is disk_active_track_drive_a
     POP HL ; HL is disk_params_drive_x
     ; Why set trach with the sector value????
@@ -803,6 +848,10 @@ set_sector_in_fdc:
     LD A,C
     OUT (io_12_fdc_sector),A
     RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; FLOPPY DISK MORE ENTRYPOINTS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 sector_translation:
     LD A,D
@@ -862,6 +911,10 @@ turn_off_motor:
     OUT (io_1c_system_bits),A
     RET
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; WAIT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 wait_b:
     ; wait time in B
     LD DE,0x686
@@ -873,6 +926,10 @@ wait_b_inner_loop:
     ; Do wait_b again with B-1
     DJNZ wait_b
     RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; FLOPPY DISK INTERNAL MORE IMPLEMENTATION READ AND WRITE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 wait_for_result:
     ; The fdc generates a NMI when it requires attention. The NMI handler
@@ -961,9 +1018,9 @@ go_to_track_sector:
     CALL set_sector_in_fdc
     RET
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; CODE RELOCATED TO UPPER RAM
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 block_to_relocate:
 reloc_move_RAM:
@@ -1091,10 +1148,9 @@ read_write_sector_completed:
     RET
 block_to_relocate_end:
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; IO PORTS INITIALIZATION
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 init_ports_count:
     DB 0x1C
@@ -1128,22 +1184,22 @@ init_ports_data:
     DW 0x0F09
     DW 0x030B
     DW 0x4F0B
-init_ports:
+EP_INITDEV:
     LD HL,init_ports_count
     LD B,(HL)
-init_port_loop:
+init_ports_loop:
     INC HL
     LD C,(HL)
     INC HL
     LD A,(HL)
     ; An out for each pair of bytes in init_ports_data
     OUT (C),A
-    DJNZ init_port_loop
+    DJNZ init_ports_loop
     RET
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; KEYBOARD
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 is_key_pressed:
     ; return 0 or FF in A
@@ -1195,9 +1251,9 @@ translate_keyboard_values:
     DB 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E
     DB 0x8F, 0x90, 0x91
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; SERIAL
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 is_serial_byte_ready:
     ; return 0 or FF in A
@@ -1226,9 +1282,9 @@ serial_get_control:
     AND 0x4
     JR force_0_or_ff
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; PARALLEL
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 lpt_status:
     ; return 0 or FF in A
@@ -1254,11 +1310,11 @@ lpt_output:
     OUT (io_1c_system_bits),A
     RET
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; CONSOLE OUTPUT
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-init_screen:
+EP_INITVID:
     ; Clear stored ESC command argument
     LD A, ' '
     LD (console_esc_equal_first_arg),A
@@ -1316,12 +1372,14 @@ console_write_c_cont:
     JR Z,console_clear_screen
     CP 0x1e
     JR Z,console_home_cursor
-    CP 0x60
-    JR C,LAB_ram_066a
+    ; For lowercase chars we may apply a conversion to greek
+    ; letters. 
+    CP 'a'-1
+    JR C,skip_greek_conversion
     ; Apply the alphabet mask
     LD A,(console_alphabet_mask)
     AND C
-LAB_ram_066a:
+skip_greek_conversion:
     ; Write the char at the cursor position
     LD (HL),A
     ; Advance the cursor
