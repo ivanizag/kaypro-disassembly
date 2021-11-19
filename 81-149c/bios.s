@@ -207,6 +207,7 @@ write_single_density_relocated:      EQU 0xfeed         ; reloc_write_single_den
 ORG	0h
     ; COLD: Resets entire computer system and is ALMOST like
     ; pressing the RESET button.
+    ; Corresponds to CP/M BIOS function BOOT
     JP EP_COLD
 
     ; INITDSK: Resets the disk input/output buffer status to empty.
@@ -221,39 +222,98 @@ ORG	0h
     JP EP_INITDEV
 
     ; HOME: Sets track number to 0
+    ; Corresponds to CP/M BIOS function HOME
     JP EP_HOME
 
-    ; SELDSK: Selects logical drive in register C (value of 0 through
-    ; 1), corresponding to drives A or B). SELDSK determines what
-    ; type of disk (density) is present in the drive.
+    ; SELDSK: Selects logical drive in register C (value of 0 through 1),
+    ; corresponding to drives A or B). SELDSK determines what type of
+    ; disk (density) is present in the drive.
+    ; Corresponds to CP/M BIOS function SELDSK
     JP EP_SELDSK
 
-    JP EP_set_track
-    JP EP_set_sector
-    JP EP_set_DMA_address
+    ; SETTRK: Sets the track number to the value in register BC. No seek
+    ; is actually performed until a disk read/write occurs.
+    ; Corresponds to CP/M BIOS function SETTRK
+    JP EP_SETTRK
 
-    JP read_sector
-    JP write_sector
+    ; SETSEC: Sets the logical sector number to the value in register C.
+    ; Corresponds to CP/M BIOS function SETSEC
+    JP EP_SETSEC
 
-    JP EP_sector_translation
-    JP EP_turn_on_motor
-    JP EP_turn_off_motor
-    ; Keyboard
-    JP is_key_pressed
-    JP get_key
-    JP keyboard_out
-    ; Serial
-    JP is_serial_byte_ready
-    JP get_byte_from_serial
-    JP serial_out
-    ; Parallel
-    JP lpt_status
-    JP lpt_output
-    JP serial_get_control
-    ; Console
-    JP console_write_c
-    ; Wait
-    JP wait_b
+    ; SETDMA: Specifies the DMA address where disk read/write occurs in
+    ; memory. The address in register pair BC is used until another DMA
+    ; address is specified.
+    ; Corresponds to CP/M BIOS function SETDMA
+    JP EP_SETDMA
+
+    ; READ: Reads the previously-specified logical sector from specified
+    ; track and disk into memory at the DMA address. Note that on
+    ; double-density disks and the hard drive, one physical sector may be
+    ; composed of up to eight logical sectors, so a physical disk read
+    ; may not actually occur. Returns disk status in A with zero
+    ; indicating no error occurred and a non-zero value indicating an
+    ; error.
+    ; Corresponds to CP/M BIOS function READ
+    JP EP_READ
+
+    ; WRITE: Same as above, but writes from memory to disk.
+    ; Corresponds to CP/M BIOS function WRITE
+    JP EP_WRITE
+
+    ; SECTRAN: Translates logical sector number to physical sector number
+    ; Corresponds to CP/M BIOS function SECTRAN
+    JP EP_SECTRAN
+
+    ; DISKON: Turns on the disk drive.
+    JP EP_DISKON
+
+    ; DISKOFF: Turns off the disk drive.
+    JP EP_DISKOFF
+
+    ; KBDSTAT: Simply returns status of keyboard queue. Returns 0FFH if
+    ; a key is available, or 00H otherwise.
+    ; Corresponds to CP/M BIOS function CONST
+    JP EP_KBDSTAT
+
+    ; KBDIN: Gets character from keyboard buffer or waits for one, if
+    ; none ready. 
+    ; Corresponds to CP/M BIOS function CONIN
+    JP EP_KBDIN
+
+    ; KBDOUT: Sends the character in register A to the keyboard port.
+    JP EP_KBDOUT
+
+    ; SIOSTI: Returns status of SIO-B input port. Returns 00H if no
+    ; character is ready, or 0FFH otherwise.
+    JP EP_SIOSTI
+
+    ; SIOIN: Gets character from SIO-B input port, or waits for one if
+    ; none is ready.
+    JP EP_SIOIN
+
+    ; SIOOUT: Sends character to SIO-B output port.
+    JP EP_SIOOUT
+
+    ; LISTST: Returns the list status of the Centronics port: 00H is
+    ; returned if the printer is busy, 0FFH if ready.
+    JP EP_LISTST
+
+    ; LIST: Sends the character in register C to the Centronics port.
+    JP EP_LIST
+
+    ; SERSTO: Returns status of SIO-B output port. Returns 0FFH if SIO-B
+    ; is ready to accept a character for output, and 00H otherwise.
+    JP EP_SERSTO
+
+    ; VIDOUT: Sends character in register C to video screen. All characters
+    ; 20H (blank) to 7FH are directly displayed and screen scroll is done,
+    ; if required. Characters below 20H are defined as control characters.
+    JP EP_VIDOUT
+
+    ; DELAY: This entry point performs a "B times 10 mSec" delay. The
+    ; 10 mSec delay is preset for 4 MHz. "B" is the value in the B-register
+    ; and ranges from 1 to 256 decimal (0 is treated as 256).
+    JP EP_DELAY
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; INITIALIZATION AND BOOT FROM DISK
@@ -262,8 +322,8 @@ ORG	0h
 EP_COLD:
     DI
     LD SP, 0xffff
-    LD B, 0xa
-    CALL wait_b
+    LD B, 0xa ; 100ms delay
+    CALL EP_DELAY
     ; Init the system, io ports, screen and memory
     CALL EP_INITDEV
     CALL EP_INITVID
@@ -292,12 +352,12 @@ EP_COLD_continue:
     LD C,0x0
     CALL EP_SELDSK
     LD BC,0x0
-    CALL EP_set_track
+    CALL EP_SETTRK
     LD C,0x0
-    CALL EP_set_sector
+    CALL EP_SETSEC
     LD BC, first_sector_load_address
-    CALL EP_set_DMA_address
-    CALL read_sector
+    CALL EP_SETDMA
+    CALL EP_READ
     DI
     ; Verify the result
     OR A
@@ -320,8 +380,8 @@ read_another_boot_sector:
     ; C has the current sector number
     PUSH BC
     ; Load sector C
-    CALL EP_set_sector
-    CALL read_sector
+    CALL EP_SETSEC
+    CALL EP_READ
     DI
     ; Verify the result
     POP BC
@@ -348,7 +408,7 @@ read_another_boot_sector:
     PUSH BC
     ; Move to track 1
     LD BC,0x0001
-    CALL EP_set_track
+    CALL EP_SETTRK
     POP BC
     ; Loop
     JR read_another_boot_sector
@@ -357,7 +417,7 @@ error_bad_disk:
     ; Error, write the error message and stop
     CALL console_write_string
     DB "\n\r\n\r\aI cannot read your diskette.",0
-    CALL EP_turn_off_motor
+    CALL EP_DISKOFF
 wait_forever:
     ; Lock the CPU forever
     JR wait_forever
@@ -426,7 +486,7 @@ EP_SELDSK:
     LD (drive_selected), A
     JP init_drive
 
-EP_set_sector:
+EP_SETSEC:
     ; BC: sector number
     LD A,C
     LD (sector_selected), A
@@ -438,12 +498,12 @@ EP_set_sector:
     ; Yes, we just store the sector number
     RET
 
-EP_set_DMA_address:
+EP_SETDMA:
     ; BC: DMA address
     LD (disk_DMA_address), BC
     RET
 
-EP_set_track:
+EP_SETTRK:
     ; C: track number
     LD (track_selected), BC
     ; Is the disk double density?
@@ -471,14 +531,14 @@ EP_HOME:
 skip_update_fc09:
     JP seek_track_0
 
-read_sector:
+EP_READ:
     ; Is disk double density?
     LD A,(disk_density)
     OR A
     ; No, go directly to the read routine
     JP NZ, read_single_density_relocated
-    ; Yes, some preparation is needed as the calls to EP_set_sector and
-    ; EP_set_track did not send the info to the fdc for double density.
+    ; Yes, some preparation is needed as the calls to EP_SETSEC and
+    ; EP_SETTRK did not send the info to the fdc for double density.
     ; Init variables
     XOR A
     LD (DAT_ram_fc0b),A ; = 0
@@ -489,14 +549,14 @@ read_sector:
     LD (DAT_ram_fc13),A ; = 2
     JP read_write_sector_cont
 
-write_sector:
+EP_WRITE:
     ; C is used, meaning?
     ; Is disk double density?
     LD A,(disk_density)
     OR A
     ; No, go directly to the write routine
     JP NZ, write_single_density_relocated
-    ; Yes, some preparation is needed as the calls to EP_set_sector and
+    ; Yes, some preparation is needed as the calls to EP_SETSEC and
     ; set_track did not send the info to the fdc on double density 
     XOR A
     LD (DAT_ram_fc12),A ; = 0
@@ -870,7 +930,7 @@ set_sector_in_fdc:
 ; FLOPPY DISK MORE ENTRYPOINTS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-EP_sector_translation:
+EP_SECTRAN:
     ; BC = sector
     ; DE = pointer to the translation table
     ; Returns in HL the translated sector
@@ -895,7 +955,7 @@ prepare_drive:
     LD A, fdc_command_force_interrupt
     OUT (io_10_fdc_command), A
     ; 2: Start the motor
-    CALL EP_turn_on_motor
+    CALL EP_DISKON
     ; 3; Update the systems bits for the proper selected drive and density.
     LD A, (disk_active_drive)
     LD E,A
@@ -917,7 +977,7 @@ prepare_drive:
     POP HL
     RET
 
-EP_turn_on_motor:
+EP_DISKON:
     ; Turns the motor on, if it is already on it can return immediately.
     ; It was off, it is started and there is a delay yo let the motors
     ; get some speed.
@@ -931,11 +991,11 @@ EP_turn_on_motor:
     RES system_bit_motors_neg,A
     OUT (io_1c_system_bits),A
     ; Wait for the motor to get some speed
-    LD B,0x32
-    CALL wait_b
+    LD B,0x32; 500ms delay
+    CALL EP_DELAY
     RET
 
-EP_turn_off_motor:
+EP_DISKOFF:
     ; Turn off in any case
     IN A,(io_1c_system_bits)
     SET system_bit_motors_neg,A
@@ -946,16 +1006,16 @@ EP_turn_off_motor:
 ; WAIT
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-wait_b:
+EP_DELAY:
     ; wait time in B
     LD DE,0x686
-wait_b_inner_loop:
+EP_DELAY_inner_loop:
     DEC DE
     LD A,D
     OR E
-    JP NZ,wait_b_inner_loop
-    ; Do wait_b again with B-1
-    DJNZ wait_b
+    JP NZ, EP_DELAY_inner_loop
+    ; Do DELAY again with B-1
+    DJNZ EP_DELAY
     RET
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1240,28 +1300,28 @@ init_ports_loop:
 ; KEYBOARD
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-is_key_pressed:
+EP_KBDSTAT:
     ; return 0 or FF in A
-    IN A,(io_07_keyboard_control)
+    IN A, (io_07_keyboard_control)
     AND 0x1
     RET Z
     LD A,0xff
     RET
 
-get_key:
+EP_KBDIN:
     ; return char in A
-    CALL is_key_pressed
-    JR Z,get_key
-    IN A,(io_05_keyboard_data)
+    CALL EP_KBDSTAT
+    JR Z, EP_KBDIN
+    IN A, (io_05_keyboard_data)
     CALL translate_keyboard_in_a
     RET
 
-keyboard_out:
+EP_KBDOUT:
     ; char in C. C=4 for the bell.
-    IN A,(io_07_keyboard_control)
+    IN A, (io_07_keyboard_control)
     AND 0x4
      ; Loop until a key is pressed
-    JR Z,keyboard_out
+    JR Z, EP_KBDOUT
     LD A,C
     OUT (io_05_keyboard_data),A
     RET
@@ -1294,30 +1354,31 @@ translate_keyboard_values:
 ; SERIAL
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-is_serial_byte_ready:
+EP_SIOSTI:
     ; return 0 or FF in A
-    IN A,(io_06_serial_control)
+    IN A, (io_06_serial_control)
     AND 0x1
     JR force_0_or_ff
 
-get_byte_from_serial:
+EP_SIOIN:
     ; return char in A
-    CALL is_serial_byte_ready
-    JR Z,get_byte_from_serial
-    IN A,(io_04_serial_data)
+    CALL EP_SIOSTI
+    JR Z, EP_SIOIN
+    IN A, (io_04_serial_data)
     RET
 
-serial_out:
+EP_SIOOUT:
     ; char in C
-    IN A,(io_06_serial_control)
+    IN A, (io_06_serial_control)
     AND 0x4
     ; Loop until a byte is ready
-    JR Z,serial_out
+    JR Z, EP_SIOOUT
     LD A,C
-    OUT (io_04_serial_data),A
+    OUT (io_04_serial_data), A
     RET
-serial_get_control:
-    IN A,(io_06_serial_control)
+
+EP_SERSTO:
+    IN A, (io_06_serial_control)
     AND 0x4
     JR force_0_or_ff
 
@@ -1325,28 +1386,29 @@ serial_get_control:
 ; PARALLEL
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-lpt_status:
+EP_LISTST:
     ; return 0 or FF in A
-    IN A,(io_1c_system_bits)
-    BIT system_bit_centronicsReady,A
+    IN A, (io_1c_system_bits)
+    BIT system_bit_centronicsReady, A
 force_0_or_ff:
     RET Z
     LD A,0xff
     RET
-lpt_output:
+
+EP_LIST:
     ; char in C
     ; Loop until the printer is ready
-    CALL lpt_status
-    JR Z,lpt_output
+    CALL EP_LISTST
+    JR Z, EP_LIST
     ; Ouput the byte in C
     LD A,C
-    OUT (io_08_parallel_data),A
+    OUT (io_08_parallel_data), A
     ; Pulse the strobe signal
-    IN A,(io_1c_system_bits)
-    SET system_bit_centronicsStrobe,A
-    OUT (io_1c_system_bits),A
-    RES system_bit_centronicsStrobe,A
-    OUT (io_1c_system_bits),A
+    IN A, (io_1c_system_bits)
+    SET system_bit_centronicsStrobe, A
+    OUT (io_1c_system_bits), A
+    RES system_bit_centronicsStrobe, A
+    OUT (io_1c_system_bits), A
     RET
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1371,40 +1433,40 @@ EP_INITVID:
     LD (console_alphabet_mask),A
     RET
 
-console_write_c:
+EP_VIDOUT:
     ; char in C
     ; Are we processing an escape sequence?
-    LD A,(console_esc_mode)
+    LD A, (console_esc_mode)
     OR A ; Clear carry
-    JP NZ,process_esc_command
+    JP NZ, process_esc_command
     ; Is it a BELL?
     LD A,0x7 ; ^G BELL
     CP C
-    JR NZ,console_write_c_cont
+    JR NZ, EP_VIDOUT_cont
     ; BELL sends a 4 to the keyboard to beep
     LD C,0x4
-    JP keyboard_out
-console_write_c_cont:
+    JP EP_KBDOUT
+EP_VIDOUT_cont:
     CALL remove_blink_and_get_cursor_position
     ; Push console_write_end to the stack to execute on any RET
-    LD DE,console_write_end
+    LD DE, console_write_end
     PUSH DE
     ; Test all special chars
     LD A,C
     CP 0xa
-    JR Z,console_line_feed
+    JR Z, console_line_feed
     CP 0xd
-    JP Z,console_carriage_return
+    JP Z, console_carriage_return
     CP 0x8
-    JR Z,console_backspace
+    JR Z, console_backspace
     CP 0xc
-    JR Z,console_right
+    JR Z, console_right
     CP 0xb
-    JR Z,console_up
+    JR Z, console_up
     CP 0x1b
-    JP Z,enable_esc_mode
+    JP Z, enable_esc_mode
     CP 0x18
-    JP Z,console_erase_to_end_of_line
+    JP Z, console_erase_to_end_of_line
     CP 0x17
     JR Z,console_erase_to_end_of_screen
     CP 0x1a
@@ -1818,7 +1880,7 @@ console_write_string:
     RET Z
     ; Write the char and continue with the string
     LD C,A
-    CALL console_write_c
+    CALL EP_VIDOUT
     JR console_write_string
 
 filler:

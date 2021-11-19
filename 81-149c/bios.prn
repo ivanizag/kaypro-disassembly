@@ -208,6 +208,7 @@
 0000			ORG	0h 
 0000			    ; COLD: Resets entire computer system and is ALMOST like 
 0000			    ; pressing the RESET button. 
+0000			    ; Corresponds to CP/M BIOS function BOOT 
 0000 c3 4b 00		    JP EP_COLD 
 0003			 
 0003			    ; INITDSK: Resets the disk input/output buffer status to empty. 
@@ -222,39 +223,98 @@
 0009 c3 68 05		    JP EP_INITDEV 
 000c			 
 000c			    ; HOME: Sets track number to 0 
+000c			    ; Corresponds to CP/M BIOS function HOME 
 000c c3 d8 01		    JP EP_HOME 
 000f			 
-000f			    ; SELDSK: Selects logical drive in register C (value of 0 through 
-000f			    ; 1), corresponding to drives A or B). SELDSK determines what 
-000f			    ; type of disk (density) is present in the drive. 
+000f			    ; SELDSK: Selects logical drive in register C (value of 0 through 1), 
+000f			    ; corresponding to drives A or B). SELDSK determines what type of 
+000f			    ; disk (density) is present in the drive. 
+000f			    ; Corresponds to CP/M BIOS function SELDSK 
 000f c3 b4 01		    JP EP_SELDSK 
 0012			 
-0012 c3 cc 01		    JP EP_set_track 
-0015 c3 bb 01		    JP EP_set_sector 
-0018 c3 c7 01		    JP EP_set_DMA_address 
+0012			    ; SETTRK: Sets the track number to the value in register BC. No seek 
+0012			    ; is actually performed until a disk read/write occurs. 
+0012			    ; Corresponds to CP/M BIOS function SETTRK 
+0012 c3 cc 01		    JP EP_SETTRK 
+0015			 
+0015			    ; SETSEC: Sets the logical sector number to the value in register C. 
+0015			    ; Corresponds to CP/M BIOS function SETSEC 
+0015 c3 bb 01		    JP EP_SETSEC 
+0018			 
+0018			    ; SETDMA: Specifies the DMA address where disk read/write occurs in 
+0018			    ; memory. The address in register pair BC is used until another DMA 
+0018			    ; address is specified. 
+0018			    ; Corresponds to CP/M BIOS function SETDMA 
+0018 c3 c7 01		    JP EP_SETDMA 
 001b			 
-001b c3 ec 01		    JP read_sector 
-001e c3 07 02		    JP write_sector 
+001b			    ; READ: Reads the previously-specified logical sector from specified 
+001b			    ; track and disk into memory at the DMA address. Note that on 
+001b			    ; double-density disks and the hard drive, one physical sector may be 
+001b			    ; composed of up to eight logical sectors, so a physical disk read 
+001b			    ; may not actually occur. Returns disk status in A with zero 
+001b			    ; indicating no error occurred and a non-zero value indicating an 
+001b			    ; error. 
+001b			    ; Corresponds to CP/M BIOS function READ 
+001b c3 ec 01		    JP EP_READ 
+001e			 
+001e			    ; WRITE: Same as above, but writes from memory to disk. 
+001e			    ; Corresponds to CP/M BIOS function WRITE 
+001e c3 07 02		    JP EP_WRITE 
 0021			 
-0021 c3 e4 03		    JP EP_sector_translation 
-0024 c3 0f 04		    JP EP_turn_on_motor 
-0027 c3 1e 04		    JP EP_turn_off_motor 
-002a			    ; Keyboard 
-002a c3 75 05		    JP is_key_pressed 
-002d c3 7d 05		    JP get_key 
-0030 c3 88 05		    JP keyboard_out 
-0033			    ; Serial 
-0033 c3 cc 05		    JP is_serial_byte_ready 
-0036 c3 d2 05		    JP get_byte_from_serial 
-0039 c3 da 05		    JP serial_out 
-003c			    ; Parallel 
-003c c3 ea 05		    JP lpt_status 
-003f c3 f2 05		    JP lpt_output 
-0042 c3 e4 05		    JP serial_get_control 
-0045			    ; Console 
-0045 c3 1e 06		    JP console_write_c 
-0048			    ; Wait 
-0048 c3 25 04		    JP wait_b 
+0021			    ; SECTRAN: Translates logical sector number to physical sector number 
+0021			    ; Corresponds to CP/M BIOS function SECTRAN 
+0021 c3 e4 03		    JP EP_SECTRAN 
+0024			 
+0024			    ; DISKON: Turns on the disk drive. 
+0024 c3 0f 04		    JP EP_DISKON 
+0027			 
+0027			    ; DISKOFF: Turns off the disk drive. 
+0027 c3 1e 04		    JP EP_DISKOFF 
+002a			 
+002a			    ; KBDSTAT: Simply returns status of keyboard queue. Returns 0FFH if 
+002a			    ; a key is available, or 00H otherwise. 
+002a			    ; Corresponds to CP/M BIOS function CONST 
+002a c3 75 05		    JP EP_KBDSTAT 
+002d			 
+002d			    ; KBDIN: Gets character from keyboard buffer or waits for one, if 
+002d			    ; none ready.  
+002d			    ; Corresponds to CP/M BIOS function CONIN 
+002d c3 7d 05		    JP EP_KBDIN 
+0030			 
+0030			    ; KBDOUT: Sends the character in register A to the keyboard port. 
+0030 c3 88 05		    JP EP_KBDOUT 
+0033			 
+0033			    ; SIOSTI: Returns status of SIO-B input port. Returns 00H if no 
+0033			    ; character is ready, or 0FFH otherwise. 
+0033 c3 cc 05		    JP EP_SIOSTI 
+0036			 
+0036			    ; SIOIN: Gets character from SIO-B input port, or waits for one if 
+0036			    ; none is ready. 
+0036 c3 d2 05		    JP EP_SIOIN 
+0039			 
+0039			    ; SIOOUT: Sends character to SIO-B output port. 
+0039 c3 da 05		    JP EP_SIOOUT 
+003c			 
+003c			    ; LISTST: Returns the list status of the Centronics port: 00H is 
+003c			    ; returned if the printer is busy, 0FFH if ready. 
+003c c3 ea 05		    JP EP_LISTST 
+003f			 
+003f			    ; LIST: Sends the character in register C to the Centronics port. 
+003f c3 f2 05		    JP EP_LIST 
+0042			 
+0042			    ; SERSTO: Returns status of SIO-B output port. Returns 0FFH if SIO-B 
+0042			    ; is ready to accept a character for output, and 00H otherwise. 
+0042 c3 e4 05		    JP EP_SERSTO 
+0045			 
+0045			    ; VIDOUT: Sends character in register C to video screen. All characters 
+0045			    ; 20H (blank) to 7FH are directly displayed and screen scroll is done, 
+0045			    ; if required. Characters below 20H are defined as control characters. 
+0045 c3 1e 06		    JP EP_VIDOUT 
+0048			 
+0048			    ; DELAY: This entry point performs a "B times 10 mSec" delay. The 
+0048			    ; 10 mSec delay is preset for 4 MHz. "B" is the value in the B-register 
+0048			    ; and ranges from 1 to 256 decimal (0 is treated as 256). 
+0048 c3 25 04		    JP EP_DELAY 
 004b			 
 004b			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 004b			; INITIALIZATION AND BOOT FROM DISK 
@@ -263,8 +323,8 @@
 004b			EP_COLD: 
 004b f3			    DI 
 004c 31 ff ff		    LD SP, 0xffff 
-004f 06 0a		    LD B, 0xa 
-0051 cd 25 04		    CALL wait_b 
+004f 06 0a		    LD B, 0xa ; 100ms delay 
+0051 cd 25 04		    CALL EP_DELAY 
 0054			    ; Init the system, io ports, screen and memory 
 0054 cd 68 05		    CALL EP_INITDEV 
 0057 cd 05 06		    CALL EP_INITVID 
@@ -293,12 +353,12 @@
 00af 0e 00		    LD C,0x0 
 00b1 cd b4 01		    CALL EP_SELDSK 
 00b4 01 00 00		    LD BC,0x0 
-00b7 cd cc 01		    CALL EP_set_track 
+00b7 cd cc 01		    CALL EP_SETTRK 
 00ba 0e 00		    LD C,0x0 
-00bc cd bb 01		    CALL EP_set_sector 
+00bc cd bb 01		    CALL EP_SETSEC 
 00bf 01 00 fa		    LD BC, first_sector_load_address 
-00c2 cd c7 01		    CALL EP_set_DMA_address 
-00c5 cd ec 01		    CALL read_sector 
+00c2 cd c7 01		    CALL EP_SETDMA 
+00c5 cd ec 01		    CALL EP_READ 
 00c8 f3			    DI 
 00c9			    ; Verify the result 
 00c9 b7			    OR A 
@@ -321,8 +381,8 @@
 00e0			    ; C has the current sector number 
 00e0 c5			    PUSH BC 
 00e1			    ; Load sector C 
-00e1 cd bb 01		    CALL EP_set_sector 
-00e4 cd ec 01		    CALL read_sector 
+00e1 cd bb 01		    CALL EP_SETSEC 
+00e4 cd ec 01		    CALL EP_READ 
 00e7 f3			    DI 
 00e8			    ; Verify the result 
 00e8 c1			    POP BC 
@@ -349,7 +409,7 @@
 0100 c5			    PUSH BC 
 0101			    ; Move to track 1 
 0101 01 01 00		    LD BC,0x0001 
-0104 cd cc 01		    CALL EP_set_track 
+0104 cd cc 01		    CALL EP_SETTRK 
 0107 c1			    POP BC 
 0108			    ; Loop 
 0108 18 d6		    JR read_another_boot_sector 
@@ -358,7 +418,7 @@
 010a			    ; Error, write the error message and stop 
 010a cd f2 07		    CALL console_write_string 
 010d .. 00		    DB "\n\r\n\r\aI cannot read your diskette.",0 
-012f cd 1e 04		    CALL EP_turn_off_motor 
+012f cd 1e 04		    CALL EP_DISKOFF 
 0132			wait_forever: 
 0132			    ; Lock the CPU forever 
 0132 18 fe		    JR wait_forever 
@@ -427,7 +487,7 @@
 01b5 32 00 fc		    LD (drive_selected), A 
 01b8 c3 1d 03		    JP init_drive 
 01bb			 
-01bb			EP_set_sector: 
+01bb			EP_SETSEC: 
 01bb			    ; BC: sector number 
 01bb 79			    LD A,C 
 01bc 32 03 fc		    LD (sector_selected), A 
@@ -439,12 +499,12 @@
 01c6			    ; Yes, we just store the sector number 
 01c6 c9			    RET 
 01c7			 
-01c7			EP_set_DMA_address: 
+01c7			EP_SETDMA: 
 01c7			    ; BC: DMA address 
 01c7 ed 43 14 fc	    LD (disk_DMA_address), BC 
 01cb c9			    RET 
 01cc			 
-01cc			EP_set_track: 
+01cc			EP_SETTRK: 
 01cc			    ; C: track number 
 01cc ed 43 01 fc	    LD (track_selected), BC 
 01d0			    ; Is the disk double density? 
@@ -472,14 +532,14 @@
 01e9			skip_update_fc09: 
 01e9 c3 cb 03		    JP seek_track_0 
 01ec			 
-01ec			read_sector: 
+01ec			EP_READ: 
 01ec			    ; Is disk double density? 
 01ec 3a 17 fe		    LD A,(disk_density) 
 01ef b7			    OR A 
 01f0			    ; No, go directly to the read routine 
 01f0 c2 dc fe		    JP NZ, read_single_density_relocated 
-01f3			    ; Yes, some preparation is needed as the calls to EP_set_sector and 
-01f3			    ; EP_set_track did not send the info to the fdc for double density. 
+01f3			    ; Yes, some preparation is needed as the calls to EP_SETSEC and 
+01f3			    ; EP_SETTRK did not send the info to the fdc for double density. 
 01f3			    ; Init variables 
 01f3 af			    XOR A 
 01f4 32 0b fc		    LD (DAT_ram_fc0b),A ; = 0 
@@ -490,14 +550,14 @@
 0201 32 13 fc		    LD (DAT_ram_fc13),A ; = 2 
 0204 c3 79 02		    JP read_write_sector_cont 
 0207			 
-0207			write_sector: 
+0207			EP_WRITE: 
 0207			    ; C is used, meaning? 
 0207			    ; Is disk double density? 
 0207 3a 17 fe		    LD A,(disk_density) 
 020a b7			    OR A 
 020b			    ; No, go directly to the write routine 
 020b c2 ed fe		    JP NZ, write_single_density_relocated 
-020e			    ; Yes, some preparation is needed as the calls to EP_set_sector and 
+020e			    ; Yes, some preparation is needed as the calls to EP_SETSEC and 
 020e			    ; set_track did not send the info to the fdc on double density  
 020e af			    XOR A 
 020f 32 12 fc		    LD (DAT_ram_fc12),A ; = 0 
@@ -871,7 +931,7 @@
 03e4			; FLOPPY DISK MORE ENTRYPOINTS 
 03e4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 03e4			 
-03e4			EP_sector_translation: 
+03e4			EP_SECTRAN: 
 03e4			    ; BC = sector 
 03e4			    ; DE = pointer to the translation table 
 03e4			    ; Returns in HL the translated sector 
@@ -896,7 +956,7 @@
 03f2 3e d0		    LD A, fdc_command_force_interrupt 
 03f4 d3 10		    OUT (io_10_fdc_command), A 
 03f6			    ; 2: Start the motor 
-03f6 cd 0f 04		    CALL EP_turn_on_motor 
+03f6 cd 0f 04		    CALL EP_DISKON 
 03f9			    ; 3; Update the systems bits for the proper selected drive and density. 
 03f9 3a 16 fe		    LD A, (disk_active_drive) 
 03fc 5f			    LD E,A 
@@ -918,7 +978,7 @@
 040d e1			    POP HL 
 040e c9			    RET 
 040f			 
-040f			EP_turn_on_motor: 
+040f			EP_DISKON: 
 040f			    ; Turns the motor on, if it is already on it can return immediately. 
 040f			    ; It was off, it is started and there is a delay yo let the motors 
 040f			    ; get some speed. 
@@ -932,11 +992,11 @@
 0414 cb b7		    RES system_bit_motors_neg,A 
 0416 d3 1c		    OUT (io_1c_system_bits),A 
 0418			    ; Wait for the motor to get some speed 
-0418 06 32		    LD B,0x32 
-041a cd 25 04		    CALL wait_b 
+0418 06 32		    LD B,0x32; 500ms delay 
+041a cd 25 04		    CALL EP_DELAY 
 041d c9			    RET 
 041e			 
-041e			EP_turn_off_motor: 
+041e			EP_DISKOFF: 
 041e			    ; Turn off in any case 
 041e db 1c		    IN A,(io_1c_system_bits) 
 0420 cb f7		    SET system_bit_motors_neg,A 
@@ -947,16 +1007,16 @@
 0425			; WAIT 
 0425			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0425			 
-0425			wait_b: 
+0425			EP_DELAY: 
 0425			    ; wait time in B 
 0425 11 86 06		    LD DE,0x686 
-0428			wait_b_inner_loop: 
+0428			EP_DELAY_inner_loop: 
 0428 1b			    DEC DE 
 0429 7a			    LD A,D 
 042a b3			    OR E 
-042b c2 28 04		    JP NZ,wait_b_inner_loop 
-042e			    ; Do wait_b again with B-1 
-042e 10 f5		    DJNZ wait_b 
+042b c2 28 04		    JP NZ, EP_DELAY_inner_loop 
+042e			    ; Do DELAY again with B-1 
+042e 10 f5		    DJNZ EP_DELAY 
 0430 c9			    RET 
 0431			 
 0431			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
@@ -1241,28 +1301,28 @@
 0575			; KEYBOARD 
 0575			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0575			 
-0575			is_key_pressed: 
+0575			EP_KBDSTAT: 
 0575			    ; return 0 or FF in A 
-0575 db 07		    IN A,(io_07_keyboard_control) 
+0575 db 07		    IN A, (io_07_keyboard_control) 
 0577 e6 01		    AND 0x1 
 0579 c8			    RET Z 
 057a 3e ff		    LD A,0xff 
 057c c9			    RET 
 057d			 
-057d			get_key: 
+057d			EP_KBDIN: 
 057d			    ; return char in A 
-057d cd 75 05		    CALL is_key_pressed 
-0580 28 fb		    JR Z,get_key 
-0582 db 05		    IN A,(io_05_keyboard_data) 
+057d cd 75 05		    CALL EP_KBDSTAT 
+0580 28 fb		    JR Z, EP_KBDIN 
+0582 db 05		    IN A, (io_05_keyboard_data) 
 0584 cd 92 05		    CALL translate_keyboard_in_a 
 0587 c9			    RET 
 0588			 
-0588			keyboard_out: 
+0588			EP_KBDOUT: 
 0588			    ; char in C. C=4 for the bell. 
-0588 db 07		    IN A,(io_07_keyboard_control) 
+0588 db 07		    IN A, (io_07_keyboard_control) 
 058a e6 04		    AND 0x4 
 058c			     ; Loop until a key is pressed 
-058c 28 fa		    JR Z,keyboard_out 
+058c 28 fa		    JR Z, EP_KBDOUT 
 058e 79			    LD A,C 
 058f d3 05		    OUT (io_05_keyboard_data),A 
 0591 c9			    RET 
@@ -1295,30 +1355,31 @@
 05cc			; SERIAL 
 05cc			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 05cc			 
-05cc			is_serial_byte_ready: 
+05cc			EP_SIOSTI: 
 05cc			    ; return 0 or FF in A 
-05cc db 06		    IN A,(io_06_serial_control) 
+05cc db 06		    IN A, (io_06_serial_control) 
 05ce e6 01		    AND 0x1 
 05d0 18 1c		    JR force_0_or_ff 
 05d2			 
-05d2			get_byte_from_serial: 
+05d2			EP_SIOIN: 
 05d2			    ; return char in A 
-05d2 cd cc 05		    CALL is_serial_byte_ready 
-05d5 28 fb		    JR Z,get_byte_from_serial 
-05d7 db 04		    IN A,(io_04_serial_data) 
+05d2 cd cc 05		    CALL EP_SIOSTI 
+05d5 28 fb		    JR Z, EP_SIOIN 
+05d7 db 04		    IN A, (io_04_serial_data) 
 05d9 c9			    RET 
 05da			 
-05da			serial_out: 
+05da			EP_SIOOUT: 
 05da			    ; char in C 
-05da db 06		    IN A,(io_06_serial_control) 
+05da db 06		    IN A, (io_06_serial_control) 
 05dc e6 04		    AND 0x4 
 05de			    ; Loop until a byte is ready 
-05de 28 fa		    JR Z,serial_out 
+05de 28 fa		    JR Z, EP_SIOOUT 
 05e0 79			    LD A,C 
-05e1 d3 04		    OUT (io_04_serial_data),A 
+05e1 d3 04		    OUT (io_04_serial_data), A 
 05e3 c9			    RET 
-05e4			serial_get_control: 
-05e4 db 06		    IN A,(io_06_serial_control) 
+05e4			 
+05e4			EP_SERSTO: 
+05e4 db 06		    IN A, (io_06_serial_control) 
 05e6 e6 04		    AND 0x4 
 05e8 18 04		    JR force_0_or_ff 
 05ea			 
@@ -1326,28 +1387,29 @@
 05ea			; PARALLEL 
 05ea			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 05ea			 
-05ea			lpt_status: 
+05ea			EP_LISTST: 
 05ea			    ; return 0 or FF in A 
-05ea db 1c		    IN A,(io_1c_system_bits) 
-05ec cb 5f		    BIT system_bit_centronicsReady,A 
+05ea db 1c		    IN A, (io_1c_system_bits) 
+05ec cb 5f		    BIT system_bit_centronicsReady, A 
 05ee			force_0_or_ff: 
 05ee c8			    RET Z 
 05ef 3e ff		    LD A,0xff 
 05f1 c9			    RET 
-05f2			lpt_output: 
+05f2			 
+05f2			EP_LIST: 
 05f2			    ; char in C 
 05f2			    ; Loop until the printer is ready 
-05f2 cd ea 05		    CALL lpt_status 
-05f5 28 fb		    JR Z,lpt_output 
+05f2 cd ea 05		    CALL EP_LISTST 
+05f5 28 fb		    JR Z, EP_LIST 
 05f7			    ; Ouput the byte in C 
 05f7 79			    LD A,C 
-05f8 d3 08		    OUT (io_08_parallel_data),A 
+05f8 d3 08		    OUT (io_08_parallel_data), A 
 05fa			    ; Pulse the strobe signal 
-05fa db 1c		    IN A,(io_1c_system_bits) 
-05fc cb e7		    SET system_bit_centronicsStrobe,A 
-05fe d3 1c		    OUT (io_1c_system_bits),A 
-0600 cb a7		    RES system_bit_centronicsStrobe,A 
-0602 d3 1c		    OUT (io_1c_system_bits),A 
+05fa db 1c		    IN A, (io_1c_system_bits) 
+05fc cb e7		    SET system_bit_centronicsStrobe, A 
+05fe d3 1c		    OUT (io_1c_system_bits), A 
+0600 cb a7		    RES system_bit_centronicsStrobe, A 
+0602 d3 1c		    OUT (io_1c_system_bits), A 
 0604 c9			    RET 
 0605			 
 0605			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
@@ -1372,40 +1434,40 @@
 061a 32 70 fe		    LD (console_alphabet_mask),A 
 061d c9			    RET 
 061e			 
-061e			console_write_c: 
+061e			EP_VIDOUT: 
 061e			    ; char in C 
 061e			    ; Are we processing an escape sequence? 
-061e 3a 6c fe		    LD A,(console_esc_mode) 
+061e 3a 6c fe		    LD A, (console_esc_mode) 
 0621 b7			    OR A ; Clear carry 
-0622 c2 3b 07		    JP NZ,process_esc_command 
+0622 c2 3b 07		    JP NZ, process_esc_command 
 0625			    ; Is it a BELL? 
 0625 3e 07		    LD A,0x7 ; ^G BELL 
 0627 b9			    CP C 
-0628 20 05		    JR NZ,console_write_c_cont 
+0628 20 05		    JR NZ, EP_VIDOUT_cont 
 062a			    ; BELL sends a 4 to the keyboard to beep 
 062a 0e 04		    LD C,0x4 
-062c c3 88 05		    JP keyboard_out 
-062f			console_write_c_cont: 
+062c c3 88 05		    JP EP_KBDOUT 
+062f			EP_VIDOUT_cont: 
 062f cd 22 07		    CALL remove_blink_and_get_cursor_position 
 0632			    ; Push console_write_end to the stack to execute on any RET 
-0632 11 95 07		    LD DE,console_write_end 
+0632 11 95 07		    LD DE, console_write_end 
 0635 d5			    PUSH DE 
 0636			    ; Test all special chars 
 0636 79			    LD A,C 
 0637 fe 0a		    CP 0xa 
-0639 28 64		    JR Z,console_line_feed 
+0639 28 64		    JR Z, console_line_feed 
 063b fe 0d		    CP 0xd 
-063d ca 30 07		    JP Z,console_carriage_return 
+063d ca 30 07		    JP Z, console_carriage_return 
 0640 fe 08		    CP 0x8 
-0642 28 61		    JR Z,console_backspace 
+0642 28 61		    JR Z, console_backspace 
 0644 fe 0c		    CP 0xc 
-0646 28 63		    JR Z,console_right 
+0646 28 63		    JR Z, console_right 
 0648 fe 0b		    CP 0xb 
-064a 28 67		    JR Z,console_up 
+064a 28 67		    JR Z, console_up 
 064c fe 1b		    CP 0x1b 
-064e ca 35 07		    JP Z,enable_esc_mode 
+064e ca 35 07		    JP Z, enable_esc_mode 
 0651 fe 18		    CP 0x18 
-0653 ca fd 06		    JP Z,console_erase_to_end_of_line 
+0653 ca fd 06		    JP Z, console_erase_to_end_of_line 
 0656 fe 17		    CP 0x17 
 0658 28 7f		    JR Z,console_erase_to_end_of_screen 
 065a fe 1a		    CP 0x1a 
@@ -1819,7 +1881,7 @@
 07f7 c8			    RET Z 
 07f8			    ; Write the char and continue with the string 
 07f8 4f			    LD C,A 
-07f9 cd 1e 06		    CALL console_write_c 
+07f9 cd 1e 06		    CALL EP_VIDOUT 
 07fc 18 f4		    JR console_write_string 
 07fe			 
 07fe			filler: 
