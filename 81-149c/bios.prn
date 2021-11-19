@@ -52,7 +52,7 @@
 0000			system_bit_centronicsReady:         EQU 3 
 0000			system_bit_centronicsStrobe:        EQU 4 
 0000			system_bit_double_density_neg:      EQU 5 
-0000			system_bit_motors:                  EQU 6 
+0000			system_bit_motors_neg:              EQU 6 
 0000			system_bit_bank:                    EQU 7 
 0000			 
 0000			system_bit_drive_a_mask:            EQU 0x01 
@@ -61,7 +61,7 @@
 0000			system_bit_centronicsReady_mask:    EQU 0x08 
 0000			system_bit_centronicsStrobe_mask:   EQU 0x10 
 0000			system_bit_double_density_neg_mask: EQU 0x20 
-0000			system_bit_motors_mask:             EQU 0x40 
+0000			system_bit_motors_meg_mask:         EQU 0x40 
 0000			system_bit_bank_mask:               EQU 0x80 
 0000			 
 0000			 
@@ -118,28 +118,29 @@
 0000			 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; Disk related variables 
+0000			; Sector address is given by the DTS (Drive, Track and Sector) 
+0000			; For double density the sector is divided by 4 to account for 512 
+0000			; bytes sector. 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			 
-0000			; D-T-S with the requested data. 
-0000			; For single density disks the fdc (flopddy disk constroller) is given the info. 
-0000			; For double density disks the info is just stored here 
-0000			ram_fc00_drive_for_next_access:  EQU 0xfc00 
-0000			ram_fc01_track_for_next_access:  EQU 0xfc01 ; 2 bytes 
-0000			ram_fc03_sector_for_next_access: EQU 0xfc03 
+0000			; DTS with the user requested data. 
+0000			drive_selected:           EQU 0xfc00 
+0000			track_selected:           EQU 0xfc01 ; 2 bytes 
+0000			sector_selected:          EQU 0xfc03 
 0000			 
 0000			ram_fc04_drive_xx:               EQU 0xfc04 
 0000			ram_fc05_track_xx:               EQU 0xfc05 ; 2 bytes 
-0000			ram_fc07_sector4_xx:             EQU 0xfc07 
+0000			ram_fc07_dd_sector_xx:           EQU 0xfc07 
 0000			 
-0000			DAT_ram_fc08_sector4:            EQU 0xfc08 ; sector_for_next_access / 4 
+0000			dd_sector_selected:              EQU 0xfc08 ; the double density sector is sector_selected / 4 
 0000			DAT_ram_fc09:                    EQU 0xfc09 ; 2 bytes 
 0000			DAT_ram_fc0a:                    EQU 0xfc0a 
 0000			DAT_ram_fc0b:                    EQU 0xfc0b 
 0000			 
-0000			; Copy of the xx_for_next access on some double density writes 
-0000			DAT_ram_fc0c_drive:              EQU 0xfc0c 
-0000			DAT_ram_fc0d_track:              EQU 0xfc0d ; 2 bytes 
-0000			DAT_ram_fc0f_sector:             EQU 0xfc0f 
+0000			; Copy of the DTS_selected on some double density writes 
+0000			drive_for_DD_write:              EQU 0xfc0c 
+0000			track_for_DD_write:              EQU 0xfc0d ; 2 bytes 
+0000			sector_for_DD_write:             EQU 0xfc0f 
 0000			 
 0000			rw_result:                       EQU 0xfc10 
 0000			DAT_ram_fc11:                    EQU 0xfc11 
@@ -182,9 +183,12 @@
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; Entry points of code relocated to upper RAM 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-0000			disk_params_destination:     EQU 0xfe71 
-0000			disk_params_drive_a:         EQU 0xfe71 
-0000			disk_params_drive_b:         EQU 0xfe82 
+0000			disk_params_destination:        EQU 0xfe71 
+0000			disk_params_drive_a:            EQU 0xfe71 
+0000			disk_params_drive_b:            EQU 0xfe82 
+0000			disk_parameter_block:           EQU 0xfe93 
+0000			disk_sector_translation_table:  EQU 0xfeb1 
+0000			 
 0000			 
 0000			relocation_destination:      EQU 0xfecd 
 0000			relocation_offset:           EQU 0xfecd - 0x04a8  ; relocation_destination - block_to_relocate 
@@ -225,14 +229,16 @@
 000f			    ; type of disk (density) is present in the drive. 
 000f c3 b4 01		    JP EP_SELDSK 
 0012			 
-0012 c3 cc 01		    JP set_track_for_next_access 
-0015 c3 bb 01		    JP set_sector_for_next_access 
-0018 c3 c7 01		    JP set_DMA_address_for_next_access 
+0012 c3 cc 01		    JP EP_set_track 
+0015 c3 bb 01		    JP EP_set_sector 
+0018 c3 c7 01		    JP EP_set_DMA_address 
+001b			 
 001b c3 ec 01		    JP read_sector 
 001e c3 07 02		    JP write_sector 
-0021 c3 e4 03		    JP sector_translation 
-0024 c3 0f 04		    JP turn_on_motor 
-0027 c3 1e 04		    JP turn_off_motor 
+0021			 
+0021 c3 e4 03		    JP EP_sector_translation 
+0024 c3 0f 04		    JP EP_turn_on_motor 
+0027 c3 1e 04		    JP EP_turn_off_motor 
 002a			    ; Keyboard 
 002a c3 75 05		    JP is_key_pressed 
 002d c3 7d 05		    JP get_key 
@@ -287,11 +293,11 @@
 00af 0e 00		    LD C,0x0 
 00b1 cd b4 01		    CALL EP_SELDSK 
 00b4 01 00 00		    LD BC,0x0 
-00b7 cd cc 01		    CALL set_track_for_next_access 
+00b7 cd cc 01		    CALL EP_set_track 
 00ba 0e 00		    LD C,0x0 
-00bc cd bb 01		    CALL set_sector_for_next_access 
+00bc cd bb 01		    CALL EP_set_sector 
 00bf 01 00 fa		    LD BC, first_sector_load_address 
-00c2 cd c7 01		    CALL set_DMA_address_for_next_access 
+00c2 cd c7 01		    CALL EP_set_DMA_address 
 00c5 cd ec 01		    CALL read_sector 
 00c8 f3			    DI 
 00c9			    ; Verify the result 
@@ -315,7 +321,7 @@
 00e0			    ; C has the current sector number 
 00e0 c5			    PUSH BC 
 00e1			    ; Load sector C 
-00e1 cd bb 01		    CALL set_sector_for_next_access 
+00e1 cd bb 01		    CALL EP_set_sector 
 00e4 cd ec 01		    CALL read_sector 
 00e7 f3			    DI 
 00e8			    ; Verify the result 
@@ -343,7 +349,7 @@
 0100 c5			    PUSH BC 
 0101			    ; Move to track 1 
 0101 01 01 00		    LD BC,0x0001 
-0104 cd cc 01		    CALL set_track_for_next_access 
+0104 cd cc 01		    CALL EP_set_track 
 0107 c1			    POP BC 
 0108			    ; Loop 
 0108 18 d6		    JR read_another_boot_sector 
@@ -352,7 +358,7 @@
 010a			    ; Error, write the error message and stop 
 010a cd f2 07		    CALL console_write_string 
 010d .. 00		    DB "\n\r\n\r\aI cannot read your diskette.",0 
-012f cd 1e 04		    CALL turn_off_motor 
+012f cd 1e 04		    CALL EP_turn_off_motor 
 0132			wait_forever: 
 0132			    ; Lock the CPU forever 
 0132 18 fe		    JR wait_forever 
@@ -361,24 +367,28 @@
 0134			; INIT DISK. COPY CODE AND DATA TO UPPER RAM. RESET VARIABLES 
 0134			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0134			 
-0134			; This data will be copied to 0xfe71 
+0134			; This data will be copied starting 0xfe71 
 0134			disk_params: 
-0134			init_data_drive_0: 
+0134			init_data_drive_0: ; to 0xfe71 
 0134 00 00 00 00 00 00 00 00	    DB 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 
 013c 73 ff a2 fe 1a fe 2a fe	    DB 0x73, 0xFF, 0xA2, 0xFE, 0x1A, 0xFE, 0x2A, 0xFE 
 0144 00			    DB 0x00 
-0145			init_data_drive_1: 
+0145			init_data_drive_1: ; to 0xfe82 
 0145 00 00 00 00 00 00 00 00	    DB 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 
 014d 73 ff a2 fe 43 fe 53 fe	    DB 0x73, 0xFF, 0xA2, 0xFE, 0x43, 0xFE, 0x53, 0xFE 
 0155 00			    DB 0x00 
-0156			; Purpose of this part? 
-0156			init_data_rest: 
+0156			init_disk_parameter_block: ; to 0xfe93. DPB for both drives 
 0156 12 00 03 07 00 52 00 1f	    DB 0x12, 0x00, 0x03, 0x07, 0x00, 0x52, 0x00, 0x1F 
-015e 00 80 00 08 00 03 00 28	    DB 0x00, 0x80, 0x00, 0x08, 0x00, 0x03, 0x00, 0x28 
-0166 00 03 07 00 c2 00 3f 00	    DB 0x00, 0x03, 0x07, 0x00, 0xC2, 0x00, 0x3F, 0x00 
-016e f0 00 10 00 01 00 01 06	    DB 0xF0, 0x00, 0x10, 0x00, 0x01, 0x00, 0x01, 0x06 
-0176 0b 10 03 08 0d 12 05 0a	    DB 0x0B, 0x10, 0x03, 0x08, 0x0D, 0x12, 0x05, 0x0A 
-017e 0f 02 07 0c 11 04 09 0e	    DB 0x0F, 0x02, 0x07, 0x0C, 0x11, 0x04, 0x09, 0x0E 
+015e 00 80 00 08 00 03 00	    DB 0x00, 0x80, 0x00, 0x08, 0x00, 0x03, 0x00 
+0165			init_unknown: ; 0xfea2 
+0165 28 00 03 07 00 c2 00 3f	    DB 0x28, 0x00, 0x03, 0x07, 0x00, 0xC2, 0x00, 0x3F 
+016d 00 f0 00 10 00 01 00	    DB 0x00, 0xF0, 0x00, 0x10, 0x00, 0x01, 0x00 
+0174			init_sector_translation_table: ; 0xfeb1 
+0174			    ; The skew is 4. 4 sectors are skipped. 
+0174			    ; There is translation for 18 sectors. 
+0174 01 06 0b 10 03 08 0d 12	    DB 0x01, 0x06, 0x0B, 0x10, 0x03, 0x08, 0x0D, 0x12 
+017c 05 0a 0f 02 07 0c 11 04	    DB 0x05, 0x0A, 0x0F, 0x02, 0x07, 0x0C, 0x11, 0x04 
+0184 09 0e		    DB 0x09, 0x0E 
 0186			disk_params_end: 
 0186			 
 0186			EP_INITDSK: 
@@ -414,13 +424,13 @@
 01b4			EP_SELDSK: 
 01b4			    ; C: disk number 
 01b4 79			    LD A,C 
-01b5 32 00 fc		    LD (ram_fc00_drive_for_next_access), A 
+01b5 32 00 fc		    LD (drive_selected), A 
 01b8 c3 1d 03		    JP init_drive 
 01bb			 
-01bb			set_sector_for_next_access: 
+01bb			EP_set_sector: 
 01bb			    ; BC: sector number 
 01bb 79			    LD A,C 
-01bc 32 03 fc		    LD (ram_fc03_sector_for_next_access), A 
+01bc 32 03 fc		    LD (sector_selected), A 
 01bf			    ; Is the disk double density? 
 01bf 3a 17 fe		    LD A, (disk_density) 
 01c2 b7			    OR A 
@@ -429,14 +439,14 @@
 01c6			    ; Yes, we just store the sector number 
 01c6 c9			    RET 
 01c7			 
-01c7			set_DMA_address_for_next_access: 
+01c7			EP_set_DMA_address: 
 01c7			    ; BC: DMA address 
 01c7 ed 43 14 fc	    LD (disk_DMA_address), BC 
 01cb c9			    RET 
 01cc			 
-01cc			set_track_for_next_access: 
+01cc			EP_set_track: 
 01cc			    ; C: track number 
-01cc ed 43 01 fc	    LD (ram_fc01_track_for_next_access), BC 
+01cc ed 43 01 fc	    LD (track_selected), BC 
 01d0			    ; Is the disk double density? 
 01d0 3a 17 fe		    LD A, (disk_density) 
 01d3 b7			    OR A 
@@ -467,11 +477,11 @@
 01ec 3a 17 fe		    LD A,(disk_density) 
 01ef b7			    OR A 
 01f0			    ; No, go directly to the read routine 
-01f0 c2 dc fe		    JP NZ,read_single_density_relocated 
-01f3			    ; Yes, some preparation is needed as the calls to set_sector_for_next_access 
-01f3			    ; and set_track_for_next_access do not send the info to the fdc on double density  
+01f0 c2 dc fe		    JP NZ, read_single_density_relocated 
+01f3			    ; Yes, some preparation is needed as the calls to EP_set_sector and 
+01f3			    ; EP_set_track did not send the info to the fdc for double density. 
+01f3			    ; Init variables 
 01f3 af			    XOR A 
-01f4			    ; Init variables 
 01f4 32 0b fc		    LD (DAT_ram_fc0b),A ; = 0 
 01f7 3e 01		    LD A,0x1 
 01f9 32 12 fc		    LD (DAT_ram_fc12),A ; = 1 
@@ -487,23 +497,24 @@
 020a b7			    OR A 
 020b			    ; No, go directly to the write routine 
 020b c2 ed fe		    JP NZ, write_single_density_relocated 
-020e			    ; Yes, some preparation is needed as the calls to set_sector_for_next_access 
-020e			    ; and set_track_for_next_access do not send the info to the fdc on double density  
+020e			    ; Yes, some preparation is needed as the calls to EP_set_sector and 
+020e			    ; set_track did not send the info to the fdc on double density  
 020e af			    XOR A 
 020f 32 12 fc		    LD (DAT_ram_fc12),A ; = 0 
 0212 79			    LD A,C 
 0213 32 13 fc		    LD (DAT_ram_fc13),A ; = C 
 0216 fe 02		    CP 0x2 
+0218			    ; When param C is 0x2 we will copy the disk, track, and sector  
 0218 c2 32 02		    JP NZ, write_sector_skip_DTS_copy 
 021b 3e 08		    LD A,0x8 
 021d 32 0b fc		    LD (DAT_ram_fc0b),A ; = 8 
-0220			    ; Copy the D-T-S requested to work variables 
-0220 3a 00 fc		    LD A,(ram_fc00_drive_for_next_access) 
-0223 32 0c fc		    LD (DAT_ram_fc0c_drive),A 
-0226 2a 01 fc		    LD HL,(ram_fc01_track_for_next_access) 
-0229 22 0d fc		    LD (DAT_ram_fc0d_track),HL 
-022c 3a 03 fc		    LD A,(ram_fc03_sector_for_next_access) 
-022f 32 0f fc		    LD (DAT_ram_fc0f_sector),A 
+0220			    ; DTS_for_DD_write = DTS_selected 
+0220 3a 00 fc		    LD A, (drive_selected) 
+0223 32 0c fc		    LD (drive_for_DD_write), A 
+0226 2a 01 fc		    LD HL, (track_selected) 
+0229 22 0d fc		    LD (track_for_DD_write), HL 
+022c 3a 03 fc		    LD A, (sector_selected) 
+022f 32 0f fc		    LD (sector_for_DD_write), A 
 0232			write_sector_skip_DTS_copy: 
 0232			    ; Is fc0b = 0? WHY? 
 0232 3a 0b fc		    LD A,(DAT_ram_fc0b) 
@@ -514,19 +525,19 @@
 0239 3d			    DEC A 
 023a 32 0b fc		    LD (DAT_ram_fc0b),A ; -- 
 023d			    ; Is drive requested different to the ¿internal? ? 
-023d 3a 00 fc		    LD A,(ram_fc00_drive_for_next_access) 
-0240 21 0c fc		    LD HL,DAT_ram_fc0c_drive 
+023d 3a 00 fc		    LD A, (drive_selected) 
+0240 21 0c fc		    LD HL, drive_for_DD_write 
 0243 be			    CP (HL) 
 0244			    ; Yes, the drive is different 
 0244 c2 71 02		    JP NZ, write_sector_skip_sector_increase 
 0247			    ; Is track requested different to the ¿internal? ? 
-0247 21 0d fc		    LD HL,DAT_ram_fc0d_track 
-024a cd 11 03		    CALL is_track_equal_to_track_for_next_access 
+0247 21 0d fc		    LD HL, track_for_DD_write 
+024a cd 11 03		    CALL is_track_equal_to_track_selected 
 024d			    ; Yes, the track is different 
 024d c2 71 02		    JP NZ, write_sector_skip_sector_increase 
 0250			    ; Is sector requested different to the ¿internal? ? 
-0250 3a 03 fc		    LD A,(ram_fc03_sector_for_next_access) 
-0253 21 0f fc		    LD HL,DAT_ram_fc0f_sector 
+0250 3a 03 fc		    LD A, (sector_selected) 
+0253 21 0f fc		    LD HL, sector_for_DD_write 
 0256 be			    CP (HL) 
 0257			    ; Yes, the sector is different 
 0257 c2 71 02		    JP NZ, write_sector_skip_sector_increase 
@@ -540,9 +551,9 @@
 025e da 6a 02		    JP C, write_sector_skip_track_increase 
 0261			    ; Yes, increase track and set sector to zero 
 0261 36 00		    LD (HL),0x0 
-0263 2a 0d fc		    LD HL,(DAT_ram_fc0d_track) 
+0263 2a 0d fc		    LD HL, (track_for_DD_write) 
 0266 23			    INC HL 
-0267 22 0d fc		    LD (DAT_ram_fc0d_track),HL 
+0267 22 0d fc		    LD (track_for_DD_write),HL 
 026a			write_sector_skip_track_increase: 
 026a af			    XOR A 
 026b 32 11 fc		    LD (DAT_ram_fc11),A ; = 0 
@@ -558,15 +569,18 @@
 0279			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0279			     
 0279			read_write_sector_cont: 
+0279			    ; Reset the result variable 
 0279 af			    XOR A 
 027a 32 10 fc		    LD (rw_result),A ; = 0 
-027d			    ; A = sector / 4 
-027d 3a 03 fc		    LD A,(ram_fc03_sector_for_next_access) 
+027d			    ; Translate the sector logical address to the double density 
+027d			    ; address. As sector in DD are four times the size of sector 
+027d			    ; in SD, we divide by 4 (or shift right twice) 
+027d 3a 03 fc		    LD A, (sector_selected) 
 0280 b7			    OR A 
 0281 1f			    RRA 
 0282 b7			    OR A 
 0283 1f			    RRA 
-0284 32 08 fc		    LD (DAT_ram_fc08_sector4),A ; sector / 4 
+0284 32 08 fc		    LD (dd_sector_selected),A ; sector_selected / 4 
 0287			    ; Is fc09 = 0? and set to 1. WHY?? 
 0287 21 09 fc		    LD HL,DAT_ram_fc09 
 028a 7e			    LD A,(HL) 
@@ -575,19 +589,19 @@
 028e			    ; Yes fc09 was zero (and now 1) 
 028e ca b5 02		    JP Z,copy_requested_DTS_to_xx 
 0291			    ; Is drive requested different to the xx? 
-0291 3a 00 fc		    LD A,(ram_fc00_drive_for_next_access) 
+0291 3a 00 fc		    LD A,(drive_selected) 
 0294 21 04 fc		    LD HL, ram_fc04_drive_xx 
 0297 be			    CP (HL) 
 0298			    ; Yes, the drive is different 
 0298 c2 ae 02		    JP NZ, read_write_DTS_different_to_xx 
 029b			    ; Is track requested different to the xx? 
 029b 21 05 fc		    LD HL, ram_fc05_track_xx 
-029e cd 11 03		    CALL is_track_equal_to_track_for_next_access 
+029e cd 11 03		    CALL is_track_equal_to_track_selected 
 02a1			    ; Yes, the track is different 
 02a1 c2 ae 02		    JP NZ, read_write_DTS_different_to_xx 
 02a4			    ; Is sector requested equals to the xx? 
-02a4 3a 08 fc		    LD A, (DAT_ram_fc08_sector4) 
-02a7 21 07 fc		    LD HL, ram_fc07_sector4_xx 
+02a4 3a 08 fc		    LD A, (dd_sector_selected) 
+02a7 21 07 fc		    LD HL, ram_fc07_dd_sector_xx 
 02aa be			    CP (HL) 
 02ab			    ; Yes, the sector is equal 
 02ab ca d2 02		    JP Z, read_write_DTS_equals_to_xx 
@@ -595,28 +609,28 @@
 02ae			    ; Is fc0a not zero? WHY? 
 02ae 3a 0a fc		    LD A,(DAT_ram_fc0a) 
 02b1 b7			    OR A 
-02b2			    ; Yes, read/write the fc0c is not zero 
+02b2			    ; Yes, read/write the fc0a is not zero 
 02b2 c4 39 04		    CALL NZ, read_write_sector_internal 
 02b5			    ; Now we need to init the xx variables 
 02b5			copy_requested_DTS_to_xx: 
-02b5			    ; copy DTS 
-02b5 3a 00 fc		    LD A,(ram_fc00_drive_for_next_access) 
+02b5			    ; DTS_xx = DTS_selected 
+02b5 3a 00 fc		    LD A, (drive_selected) 
 02b8 32 04 fc		    LD (ram_fc04_drive_xx),A 
-02bb 2a 01 fc		    LD HL,(ram_fc01_track_for_next_access) 
+02bb 2a 01 fc		    LD HL, (track_selected) 
 02be 22 05 fc		    LD (ram_fc05_track_xx),HL 
-02c1 3a 08 fc		    LD A,(DAT_ram_fc08_sector4) 
-02c4 32 07 fc		    LD (ram_fc07_sector4_xx),A 
+02c1 3a 08 fc		    LD A,(dd_sector_selected) 
+02c4 32 07 fc		    LD (ram_fc07_dd_sector_xx),A 
 02c7			    ; Is fc11 not zero? WHY? 
 02c7 3a 11 fc		    LD A,(DAT_ram_fc11) 
 02ca b7			    OR A 
 02cb			    ; Not zero 
-02cb c4 77 04		    CALL NZ,read_sector_xx 
+02cb c4 77 04		    CALL NZ, read_xx_to_buffer_with_retries 
 02ce			    ; Is zero 
 02ce af			    XOR A 
 02cf 32 0a fc		    LD (DAT_ram_fc0a),A ; = 0 
 02d2			read_write_DTS_equals_to_xx: 
 02d2			    ; Calculate the sector buffer to use for this sector    
-02d2 3a 03 fc		    LD A,(ram_fc03_sector_for_next_access) 
+02d2 3a 03 fc		    LD A, (sector_selected) 
 02d5 e6 03		    AND 0x3 ; mod 4 
 02d7 6f			    LD L,A 
 02d8 26 00		    LD H,0x0 
@@ -655,10 +669,13 @@
 030d 3a 10 fc		    LD A,(rw_result) 
 0310 c9			    RET 
 0311			 
-0311			is_track_equal_to_track_for_next_access: 
+0311			is_track_equal_to_track_selected: 
 0311			    ; HL = address to a variable with the track 
+0311			    ; Returns flag Z set if they are equal. 
+0311			    ; This is not inline as the drive and sector comparison because 
+0311			    ; the track is two bytes. 
 0311 eb			    EX DE,HL 
-0312 21 01 fc		    LD HL, ram_fc01_track_for_next_access 
+0312 21 01 fc		    LD HL, track_selected 
 0315 1a			    LD A,(DE) ; = track 
 0316 be			    CP (HL) 
 0317 c0			    RET NZ 
@@ -735,7 +752,7 @@
 035d			    ; No, we are done 
 035d c0			    RET NZ 
 035e			    ; Yes 
-035e cd ef 03		    CALL fdc_ensure_ready 
+035e cd ef 03		    CALL prepare_drive 
 0361 cd d8 01		    CALL EP_HOME 
 0364			    ; Enable double density 
 0364 db 1c		    IN A,(io_1c_system_bits) 
@@ -788,15 +805,15 @@
 039d			    ; HL is disk_params_drive_x 
 039d e5			    PUSH HL 
 039e d5			    PUSH DE 
-039f			    ; Set 0xfeb1 on the disk params $0 and $1 
-039f 11 b1 fe		    LD DE,0xfeb1 
+039f			    ; Set the sector translation table on the disk params $0 and $1 
+039f 11 b1 fe		    LD DE, disk_sector_translation_table 
 03a2 73			    LD (HL),E 
 03a3 23			    INC HL 
 03a4 72			    LD (HL),D 
-03a5			    ; Set 0xfe93 on the disk params $a and $b 
+03a5			    ; Set the DPB on the disk params $a and $b 
 03a5 11 09 00		    LD DE,0x0009 
 03a8 19			    ADD HL,DE 
-03a9 11 93 fe		    LD DE,0xfe93 
+03a9 11 93 fe		    LD DE, disk_parameter_block 
 03ac 73			    LD (HL),E 
 03ad 23			    INC HL 
 03ae 72			    LD (HL),D 
@@ -828,7 +845,7 @@
 03ca c9			    RET 
 03cb			 
 03cb			seek_track_0: 
-03cb cd ef 03		    CALL fdc_ensure_ready 
+03cb cd ef 03		    CALL prepare_drive 
 03ce			    ; Restore controller 
 03ce 3e 00		    LD A, fdc_command_restore 
 03d0 d3 10		    OUT (io_10_fdc_command), A 
@@ -836,7 +853,7 @@
 03d4			 
 03d4			seek_track: 
 03d4			    ; C: track number 
-03d4 cd ef 03		    CALL fdc_ensure_ready 
+03d4 cd ef 03		    CALL prepare_drive 
 03d7 79			    LD A,C 
 03d8			    ; Request seek track C 
 03d8 d3 13		    OUT (io_13_fdc_data),A 
@@ -854,61 +871,75 @@
 03e4			; FLOPPY DISK MORE ENTRYPOINTS 
 03e4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 03e4			 
-03e4			sector_translation: 
+03e4			EP_sector_translation: 
+03e4			    ; BC = sector 
+03e4			    ; DE = pointer to the translation table 
+03e4			    ; Returns in HL the translated sector 
 03e4 7a			    LD A,D 
 03e5 b3			    OR E 
 03e6 60			    LD H,B 
-03e7 69			    LD L,C 
+03e7 69			    LD L,C ; HL = BC; Why is this needed? 
+03e8			    ; Return if there is no translation table (DE=0x0000) 
 03e8 c8			    RET Z 
-03e9 eb			    EX DE,HL 
-03ea 09			    ADD HL,BC 
+03e9 eb			    EX DE,HL ; HL <> DE 
+03ea 09			    ADD HL,BC ; HL = sector + BC 
 03eb 6e			    LD L,(HL) 
 03ec 26 00		    LD H,0x0 
 03ee c9			    RET 
 03ef			 
-03ef			fdc_ensure_ready: 
-03ef			    ; Interuupts any pending command 
+03ef			prepare_drive: 
+03ef			    ; 1: Interrupt any pending floppy disk controller command. 
 03ef e5			    PUSH HL 
 03f0 d5			    PUSH DE 
 03f1 c5			    PUSH BC 
+03f2			    ; 1: Interrupt any pending floppy disk controller command. 
 03f2 3e d0		    LD A, fdc_command_force_interrupt 
-03f4 d3 10		    OUT (io_10_fdc_command),A 
-03f6 cd 0f 04		    CALL turn_on_motor 
-03f9 3a 16 fe		    LD A,(disk_active_drive) 
+03f4 d3 10		    OUT (io_10_fdc_command), A 
+03f6			    ; 2: Start the motor 
+03f6 cd 0f 04		    CALL EP_turn_on_motor 
+03f9			    ; 3; Update the systems bits for the proper selected drive and density. 
+03f9 3a 16 fe		    LD A, (disk_active_drive) 
 03fc 5f			    LD E,A 
-03fd			    ; Clear drive select bits 
 03fd db 1c		    IN A,(io_1c_system_bits) 
-03ff e6 fc		    AND ~(system_bit_drive_a_mask|system_bit_drive_b_mask) 
+03ff			    ; Clear drive select bits 
+03ff e6 fc		    AND ~ (system_bit_drive_a_mask|system_bit_drive_b_mask) 
+0401			    ; Add the bit of the drive selected 
 0401 b3			    OR E 
 0402 3c			    INC A ; disk A(0) to mask 0x1, disk B(1) to mask 0x2 
-0403			    ; Reflect the disk density variable on the system bits. 
+0403			    ; Clear the double density bit 
 0403 e6 df		    AND ~system_bit_double_density_neg_mask 
-0405 21 17 fe		    LD HL,disk_density 
+0405			    ; Reflect the disk density variable on the system bits. 
+0405 21 17 fe		    LD HL, disk_density 
 0408 b6			    OR (HL) 
-0409 d3 1c		    OUT (io_1c_system_bits),A 
+0409			    ; Store the modified system bits 
+0409 d3 1c		    OUT (io_1c_system_bits), A 
 040b c1			    POP BC 
 040c d1			    POP DE 
 040d e1			    POP HL 
 040e c9			    RET 
 040f			 
-040f			turn_on_motor: 
+040f			EP_turn_on_motor: 
+040f			    ; Turns the motor on, if it is already on it can return immediately. 
+040f			    ; It was off, it is started and there is a delay yo let the motors 
+040f			    ; get some speed. 
+040f			    ; 
 040f			    ; Is it already on? 
 040f db 1c		    IN A,(io_1c_system_bits) 
-0411 cb 77		    BIT system_bit_motors,A 
-0413			    ; Return if it is 
+0411 cb 77		    BIT system_bit_motors_neg,A 
+0413			    ; Yes, return 
 0413 c8			    RET Z 
-0414			    ; Turn on 
-0414 cb b7		    RES system_bit_motors,A 
+0414			    ; No, turn on 
+0414 cb b7		    RES system_bit_motors_neg,A 
 0416 d3 1c		    OUT (io_1c_system_bits),A 
-0418			    ; Wait for motor to get some speed 
+0418			    ; Wait for the motor to get some speed 
 0418 06 32		    LD B,0x32 
 041a cd 25 04		    CALL wait_b 
 041d c9			    RET 
 041e			 
-041e			turn_off_motor: 
+041e			EP_turn_off_motor: 
 041e			    ; Turn off in any case 
 041e db 1c		    IN A,(io_1c_system_bits) 
-0420 cb f7		    SET system_bit_motors,A 
+0420 cb f7		    SET system_bit_motors_neg,A 
 0422 d3 1c		    OUT (io_1c_system_bits),A 
 0424 c9			    RET 
 0425			 
@@ -950,7 +981,7 @@
 043e			read_write_sector_internal_loop: 
 043e e5			    PUSH HL 
 043f d5			    PUSH DE 
-0440 cd 92 04		    CALL go_to_track_sector 
+0440 cd 92 04		    CALL go_to_DTS_xx 
 0443 cd f4 fe		    CALL write_from_buffer_relocated 
 0446 d1			    POP DE 
 0447 e1			    POP HL 
@@ -990,31 +1021,39 @@
 0473 3e ff		    LD A,0xff 
 0475 18 f5		    JR process_result 
 0477			 
-0477			read_sector_xx: 
-0477 11 0f 04		    LD DE,0x040f ; track 4, sector f 
-047a			read_sector_xx_loop: 
+0477			read_xx_to_buffer_with_retries: 
+0477			    ; Load a full 512 bytes double density sector in the buffer. 
+0477			    ; It is retried 15*4 times. Every 15 tries the head is fully moved 
+0477			    ; to track 0 and moved to the requested track. 
+0477 11 0f 04		    LD DE,0x040f ; retry 15 times without seek. Repeat all up to 4 times with seek0 
+047a			read_retry: 
 047a d5			    PUSH DE 
-047b cd 92 04		    CALL go_to_track_sector 
+047b cd 92 04		    CALL go_to_DTS_xx 
+047e			    ; Read 512 bytes 
 047e cd e3 fe		    CALL read_to_buffer_relocated 
-0481 32 10 fc		    LD (rw_result),A 
+0481 32 10 fc		    LD (rw_result), A 
 0484 d1			    POP DE 
-0485			    ; Loop completed, return 
+0485			    ; Read success, exit 
 0485 c8			    RET Z 
 0486 1d			    DEC E 
-0487 20 f1		    JR NZ,read_sector_xx_loop 
+0487			    ; Retry without moving the head home 
+0487 20 f1		    JR NZ,read_retry 
 0489 15			    DEC D 
+048a			    ; Do not retry anymore 
 048a c8			    RET Z 
+048b			    ; Mode the head to track 0 to retry makeing sure the head is moved. 
 048b cd cb 03		    CALL seek_track_0 
+048e			    ;  
 048e 1e 0f		    LD E,0xf 
-0490 18 e8		    JR read_sector_xx_loop 
+0490 18 e8		    JR read_retry 
 0492			 
-0492			go_to_track_sector: 
+0492			go_to_DTS_xx: 
 0492 3a 04 fc		    LD A,(ram_fc04_drive_xx) 
 0495 4f			    LD C,A 
 0496 cd 1d 03		    CALL init_drive 
 0499 ed 4b 05 fc	    LD BC,(ram_fc05_track_xx) 
 049d cd d4 03		    CALL seek_track 
-04a0 3a 07 fc		    LD A,(ram_fc07_sector4_xx) 
+04a0 3a 07 fc		    LD A,(ram_fc07_dd_sector_xx) 
 04a3 4f			    LD C,A 
 04a4 cd e0 03		    CALL set_sector_in_fdc 
 04a7 c9			    RET 
@@ -1053,7 +1092,7 @@
 04c8			 
 04c8			reloc_write_single_density: 
 04c8			    ; Write 128 bytes from DMA 
-04c8 2a 14 fc		    LD HL,(disk_DMA_address) 
+04c8 2a 14 fc		    LD HL, (disk_DMA_address) 
 04cb 06 01		    LD B, rw_mode_single_density 
 04cd 18 05		    JR reloc_write_internal 
 04cf			reloc_write_from_buffer: 
@@ -1065,9 +1104,9 @@
 04d4 11 ac fc		    LD DE, fdc_status_write_error_bitmask * 0x100 + fdc_command_write_sector 
 04d7			 
 04d7			reloc_RW_internal: 
-04d7 cd ef 03		    CALL fdc_ensure_ready 
+04d7 cd ef 03		    CALL prepare_drive; Call in the ROM area 
 04da f3			    DI 
-04db			    ; Hide the ROM 
+04db			    ; Hide the ROM. No more calls to the ROM passed this instruction 
 04db db 1c		    IN A,(io_1c_system_bits) 
 04dd cb bf		    RES system_bit_bank,A 
 04df d3 1c		    OUT (io_1c_system_bits),A 
