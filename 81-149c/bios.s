@@ -80,17 +80,17 @@ address_vram_start_of_last_line: EQU address_vram_end - console_line_length + 1 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Disk constants
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-sector_size:	    EQU 128 ; See NOTES
-sectors_per_track:  EQU 40 ; See NOTES
-disk_count:         EQU 2 ; 0 is A: and 1 is B:
-read_write_retries: EQU 3
+logical_sector_size:                EQU 128 ; See NOTES
+sectors_per_track_double_density:   EQU 40 ; See NOTES
+disk_count:                         EQU 2 ; 0 is A: and 1 is B:
+read_write_retries:                 EQU 3
 
-fdc_command_restore:             EQU 0x00
-fdc_command_read_address:        EQU 0xc4
-fdc_command_seek:                EQU 0x10
-fdc_command_read_sector:         EQU 0x88
-fdc_command_write_sector:        EQU 0xac
-fdc_command_force_interrupt:     EQU 0xd0
+fdc_command_restore:                EQU 0x00
+fdc_command_read_address:           EQU 0xc4
+fdc_command_seek:                   EQU 0x10
+fdc_command_read_sector:            EQU 0x88
+fdc_command_write_sector:           EQU 0xac
+fdc_command_force_interrupt:        EQU 0xd0
 
 rw_mode_single_density: EQU 1 ; We read or write 128 bytes directly to/from DMA
 rw_mode_double_density: EQU 4 ; We read or write the full 512 bytes buffer
@@ -149,9 +149,9 @@ disk_DMA_address:                EQU 0xfc14 ; 2 bytes
 
 ; There are 4 sector buffers. To select the buffer we get the sector modulo 4
 sector_buffer_0:                EQU 0xfc16
-sector_buffer_1:                EQU 0xfc16 + sector_size
-sector_buffer_2:                EQU 0xfc16 + sector_size * 2
-sector_buffer_3:                EQU 0xfc16 + sector_size * 3
+sector_buffer_1:                EQU 0xfc16 + logical_sector_size
+sector_buffer_2:                EQU 0xfc16 + logical_sector_size * 2
+sector_buffer_3:                EQU 0xfc16 + logical_sector_size * 3
 
 disk_active_drive:              EQU 0xfe16
 disk_density:                   EQU 0xfe17
@@ -183,19 +183,28 @@ console_alphabet_greek_mask: EQU 0x1f
 ; Entry points of code relocated to upper RAM
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 disk_params_destination:        EQU 0xfe71
-disk_params_drive_a:            EQU 0xfe71
-disk_params_drive_b:            EQU 0xfe82
-disk_parameter_block:           EQU 0xfe93
+disk_parameter_header_0:        EQU 0xfe71
+disk_parameter_header_1:        EQU 0xfe82
+disk_parameter_block_single_density:    EQU 0xfe93
+disk_parameter_block_double_density:    EQU 0xfea2
 disk_sector_translation_table:  EQU 0xfeb1
 
+relocation_destination:         EQU 0xfecd
+relocation_offset:              EQU 0xfecd - 0x04a8  ; relocation_destination - block_to_relocate
+read_single_density_relocated:  EQU 0xfedc           ; reloc_single_density + relocation_offset
+move_RAM_relocated:             EQU 0xfecd           ; reloc_move_RAM + relocation_offset
+read_to_buffer_relocated:       EQU 0xfee3           ; reloc_read_to_buffer + relocation_offset
+write_from_buffer_relocated:    EQU 0xfef4           ; reloc_write_from_buffer + relocation_offset
+write_single_density_relocated: EQU 0xfeed         ; reloc_write_single_density + relocation_offset
 
-relocation_destination:      EQU 0xfecd
-relocation_offset:           EQU 0xfecd - 0x04a8  ; relocation_destination - block_to_relocate
-read_single_density_relocated:       EQU 0xfedc           ; reloc_single_density + relocation_offset
-move_RAM_relocated:          EQU 0xfecd           ; reloc_move_RAM + relocation_offset
-read_to_buffer_relocated:    EQU 0xfee3           ; reloc_read_to_buffer + relocation_offset
-write_from_buffer_relocated: EQU 0xfef4           ; reloc_write_from_buffer + relocation_offset
-write_single_density_relocated:      EQU 0xfeed         ; reloc_write_single_density + relocation_offset
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Other addresses
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+CSV_0:      EQU 0xfe1a ; Scrathpad for change disk check, drive 0
+ALV_0:      EQU 0xfe2a ; Scrathpad for BDOS disk allocation, drive 0
+CSV_1:      EQU 0xfe43 ; Scrathpad for change disk check, drive 1
+ALV_1:      EQU 0xfe53 ; Scrathpad for BDOS disk allocation, drive 1
+DIRBUF:     EQU 0xff73 ; Address of a 128 byte scratchpad for BDOS dir ops
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -361,17 +370,17 @@ EP_COLD_continue:
     DI
     ; Verify the result
     OR A
-    JR NZ,error_bad_disk
+    JR NZ, error_bad_disk
     ; Set the DMA destination as instructed by the info
     ; on the first boot sector
-    LD BC,(address_to_load_second_sector)
-    LD (disk_DMA_address),BC
+    LD BC, (address_to_load_second_sector)
+    LD (disk_DMA_address), BC
     ; Store the boot exec addres on the stack. A RET will
     ; use this address and start executionthere
-    LD BC,(address_to_exec_boot)
+    LD BC, (address_to_exec_boot)
     PUSH BC
     ; Prepare the loading of the rest of the sectors
-    LD BC,(count_of_boot_sectors_needed)
+    LD BC, (count_of_boot_sectors_needed)
     LD B,C
     ; Continue reading from sector 1
     LD C,0x1
@@ -386,19 +395,19 @@ read_another_boot_sector:
     ; Verify the result
     POP BC
     OR A
-    JR NZ,error_bad_disk
-    ; Increase by 128 the load address (sector size is 128 bytes)
-    LD HL,(disk_DMA_address)
-    LD DE, sector_size
+    JR NZ, error_bad_disk
+    ; Increase by 128 the load address (logical sector size is 128 bytes)
+    LD HL, (disk_DMA_address)
+    LD DE, logical_sector_size
     ADD HL,DE                                    
-    LD (disk_DMA_address),HL
+    LD (disk_DMA_address), HL
     ; Decrease the count of sectors remaining
     DEC B
     ; If done , jump to the boot exec address previously pushed to the stack
     RET Z
     ; Not finished, calculate the next sector and track
     INC C
-    LD A, sectors_per_track
+    LD A, sectors_per_track_double_density
     ; Are we on the last sector of the track?
     CP C
     ; No, continue reading sector + 1
@@ -428,26 +437,56 @@ wait_forever:
 
 ; This data will be copied starting 0xfe71
 disk_params:
-init_data_drive_0: ; to 0xfe71
-    DB 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-    DB 0x73, 0xFF, 0xA2, 0xFE, 0x1A, 0xFE, 0x2A, 0xFE
-    DB 0x00
-init_data_drive_1: ; to 0xfe82
-    DB 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-    DB 0x73, 0xFF, 0xA2, 0xFE, 0x43, 0xFE, 0x53, 0xFE
-    DB 0x00
-init_disk_parameter_block: ; to 0xfe93. DPB for both drives
-    DB 0x12, 0x00, 0x03, 0x07, 0x00, 0x52, 0x00, 0x1F
-    DB 0x00, 0x80, 0x00, 0x08, 0x00, 0x03, 0x00
-init_unknown: ; 0xfea2
-    DB 0x28, 0x00, 0x03, 0x07, 0x00, 0xC2, 0x00, 0x3F
-    DB 0x00, 0xF0, 0x00, 0x10, 0x00, 0x01, 0x00
+init_disk_parameter_header_0: ; to 0xfe71
+    DW 0x0000 ; XLT, logical translation table
+    DW 0x0000, 0x0000, 0x0000 ; Scrathpad for BDOS
+    DW DIRBUF ; Address of additional scratchpad for BDOS,
+    DW disk_parameter_block_double_density ; DPB
+    DW CSV_0
+    DW ALV_0
+    DB 0x00 ; Used by the BIOS to store the disk density
+
+init_disk_parameter_header_1: ; to 0xfe82
+    DW 0x0000 ; XLT, logical translation table
+    DW 0x0000, 0x0000, 0x0000 ; Scrathpad for BDOS
+    DW DIRBUF ; Address of additional scratchpad for BDOS,
+    DW disk_parameter_block_double_density ; DPB
+    DW CSV_1
+    DW ALV_1
+    DB 0x00 ; Used by the BIOS to store the disk density
+
+init_disk_parameter_block_single_density: ; to 0xfe93
+    DW 18   ; SPT, sectors per track
+    DB 3    ; BSH, data alloc shift factor
+    DB 7    ; BLM
+    ; As BSH=3 and BLM=7, then BLS (data alocation size) is 1024.
+    DB 0    ; EXM, extent mask
+    DW 82   ; DSM, total storage
+    DW 31   ; DRM, number of directory entries
+    DB 0x80 ; AL0
+    DB 0x00 ; AL1
+    DW 8    ; CKS, directory check vector size
+    DW 3    ; OFF, number of reserved tracks
+
+init_disk_parameter_block_double_density: ; to 0xfea2
+    DW 40   ; SPT, sectors per track
+    DB 3    ; BSH, data alloc shift factor
+    DB 7    ; BLM
+    ; As BSH=3 and BLM=7, then BLS (data alocation size) is 1024.
+    DB 0    ; EXM, extent mask
+    DW 194  ; DSM, total storage
+    DW 63   ; DRM, number of directory entries
+    DB 0xF0 ; AL0
+    DB 0x00 ; AL1
+    DW 16   ; CKS, directory check vector size
+    DW 1    ; OFF, number of reserved tracks
+
 init_sector_translation_table: ; 0xfeb1
-    ; The skew is 4. 4 sectors are skipped.
+    ; Only used for single density
     ; There is translation for 18 sectors.
-    DB 0x01, 0x06, 0x0B, 0x10, 0x03, 0x08, 0x0D, 0x12
-    DB 0x05, 0x0A, 0x0F, 0x02, 0x07, 0x0C, 0x11, 0x04
-    DB 0x09, 0x0E
+    DB 1, 6, 11, 16, 3, 8, 13, 18
+    DB 5, 10, 15, 2, 7, 12, 17, 4
+    DB 9, 14
 disk_params_end:
 
 EP_INITDSK:
@@ -605,7 +644,7 @@ write_sector_skip_DTS_copy:
     INC (HL)
     ; Are we at the end of the track?
     LD A,(HL)
-    CP sectors_per_track
+    CP sectors_per_track_double_density
     ; No
     JP C, write_sector_skip_track_increase
     ; Yes, increase track and set sector to zero
@@ -702,9 +741,9 @@ read_write_DTS_equals_to_xx:
     ADD HL,HL ; *2. Combined *128
     LD DE, sector_buffer_0
     ADD HL,DE
-    ; HL = 0xfc16 + /sector mod 4) * sector_size
+    ; HL = 0xfc16 + (sector mod 4) * logical_sector_size
     LD DE,(disk_DMA_address)
-    LD BC,sector_size
+    LD BC,logical_sector_size
     LD A,(DAT_ram_fc12)
     OR A
     JR NZ,LAB_ram_02f8
@@ -758,9 +797,9 @@ init_drive:
     RET NC
     ; Point HL to the disk info for disk A or B
     OR A
-    LD HL, disk_params_drive_a
+    LD HL, disk_parameter_header_0
     JR Z, disk_params_skip_for_drive_a
-    LD HL, disk_params_drive_b
+    LD HL, disk_parameter_header_1
 disk_params_skip_for_drive_a:
     ; The current drive is the requested one?
     LD A,(disk_active_drive)
@@ -836,18 +875,18 @@ skip_for_drive_a:
     JR set_single_density_disk
 
 set_double_density_disk:
-    ; HL is disk_params_drive_x
+    ; HL is disk_parameter_header
     PUSH HL
     PUSH DE
-    ; Set 0 on the disk params $0 and $1
+    ; Set no sector tran on the disk params $0 and $1
     LD DE,0x0000
     LD (HL),E
     INC HL
     LD (HL),D
-    ; Set 0xfea2 on the disk params $a and $b
+    ; Set DPB for double density on the disk params $a and $b
     LD DE,0x0009
     ADD HL,DE
-    LD DE,0xfea2
+    LD DE, disk_parameter_block_double_density
     LD (HL),E
     INC HL
     LD (HL),D
@@ -861,7 +900,7 @@ set_double_density_disk:
     JR init_drive_end
 
 set_single_density_disk:
-    ; HL is disk_params_drive_x
+    ; HL is disk_parameter_header
     PUSH HL
     PUSH DE
     ; Set the sector translation table on the disk params $0 and $1
@@ -872,7 +911,7 @@ set_single_density_disk:
     ; Set the DPB on the disk params $a and $b
     LD DE,0x0009
     ADD HL,DE
-    LD DE, disk_parameter_block
+    LD DE, disk_parameter_block_single_density
     LD (HL),E
     INC HL
     LD (HL),D
@@ -885,9 +924,9 @@ set_single_density_disk:
     LD (disk_density),A
 
 init_drive_end:
-    POP DE ; DE is disk_active_track_drive_a
-    POP HL ; HL is disk_params_drive_x
-    ; Why set trach with the sector value????
+    POP DE ; DE is disk_active_track_drive_x
+    POP HL ; HL is disk_parameter_header
+    ; Why set track with the sector value????
     IN A,(io_12_fdc_sector)
     OUT (io_11_fdc_track),A
     ; Update disk_active_track_drive_x
@@ -1181,7 +1220,7 @@ reloc_RW_internal:
     POP HL
     ;
     LD A,B ; A = rw_mode
-    LD BC, sector_size * 0x100 + io_13_fdc_data  ; Setup of the INI command
+    LD BC, logical_sector_size * 0x100 + io_13_fdc_data  ; Setup of the INI command
     BIT 0x0,A 
     JR NZ, read_rw_internal_cont
     ; For rw_mode_double_density let's set B to zero
