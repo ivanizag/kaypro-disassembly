@@ -81,6 +81,7 @@ address_vram_start_of_last_line: EQU address_vram_end - console_line_length + 1 
 ; Disk constants
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 logical_sector_size:                EQU 128 ; See NOTES
+double_density_sector_size:         EQU 1024 ; See NOTES
 sectors_per_track_double_density:   EQU 40 ; See NOTES
 disk_count:                         EQU 2 ; 0 is A: and 1 is B:
 read_write_retries:                 EQU 3
@@ -120,31 +121,44 @@ count_of_boot_sectors_needed:  EQU 0xfa06
 ; Sector address is given by the DTS (Drive, Track and Sector)
 ; For double density the sector is divided by 4 to account for 512
 ; bytes sector.
+; See "Uninitialized RAM data areas" in Appendix G
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-; DTS with the user requested data.
-drive_selected:           EQU 0xfc00
-track_selected:           EQU 0xfc01 ; 2 bytes
-sector_selected:          EQU 0xfc03
+; DTS with the user requested data. Uses losgical sectors of 128 bytes
+drive_selected:         EQU 0xfc00
+track_selected:         EQU 0xfc01 ; 2 bytes
+sector_selected:        EQU 0xfc03
 
-ram_fc04_drive_xx:               EQU 0xfc04
-ram_fc05_track_xx:               EQU 0xfc05 ; 2 bytes
-ram_fc07_dd_sector_xx:           EQU 0xfc07
+; DTS as understood by the floppy disk controller. Sectors are 512 bytes
+drive_in_fdc:           EQU 0xfc04
+track_in_fdc:           EQU 0xfc05 ; 2 bytes
+sector_in_fdc:          EQU 0xfc07
 
 dd_sector_selected:              EQU 0xfc08 ; the double density sector is sector_selected / 4
-DAT_ram_fc09:                    EQU 0xfc09 ; 2 bytes
-DAT_ram_fc0a:                    EQU 0xfc0a
-DAT_ram_fc0b:                    EQU 0xfc0b
+fdc_set_flag:                    EQU 0xfc09 ; 'hstact'
+DAT_ram_fc0a:                    EQU 0xfc0a ; 'hstwrt'
 
-; Copy of the DTS_selected on some double density writes
-drive_for_DD_write:              EQU 0xfc0c
-track_for_DD_write:              EQU 0xfc0d ; 2 bytes
-sector_for_DD_write:             EQU 0xfc0f
+pending_count:                   EQU 0xfc0b
+drive_unallocated:               EQU 0xfc0c
+track_unallocated:               EQU 0xfc0d ; 2 bytes
+sector_unallocated:              EQU 0xfc0f
 
 rw_result:                       EQU 0xfc10
-DAT_ram_fc11:                    EQU 0xfc11
-DAT_ram_fc12:                    EQU 0xfc12
-DAT_ram_fc13:                    EQU 0xfc13
+
+read_needed_flag:                EQU 0xfc11
+read_not_needed:                 EQU 0
+read_needed:                     EQU 1
+
+; See CP/M 2.2 System alteration guide appendix G
+operation_type:                  EQU 0xfc12 ; 'readop' in appendix G
+operation_type_write:            EQU 0
+operation_type_read:             EQU 1
+
+; See CP/M 2.2 System alteration guide, section 12 and appendix G
+rw_type:                         EQU 0xfc13 ; 'wrtype' in appendix G
+rw_type_normal_write:              EQU 0 ; write to allocated
+rw_type_directory_write:           EQU 1
+rw_type_read_or_unallocated_write: EQU 2 ; write to unallocated
 disk_DMA_address:                EQU 0xfc14 ; 2 bytes
 
 ; There are 4 sector buffers. To select the buffer we get the sector modulo 4
@@ -432,8 +446,9 @@ wait_forever:
     JR wait_forever
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; INIT DISK. COPY CODE AND DATA TO UPPER RAM. RESET VARIABLES
+; INIT DISK. COPY CODE AND DISK PARAMS TO UPPER RAM. RESET VARIABLES
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; See CP/M 2.2 System alteration guide, section 10
 
 ; This data will be copied starting 0xfe71
 disk_params:
@@ -505,8 +520,8 @@ EP_INITDSK:
 
     ; Init some variables
     XOR A
-    LD (DAT_ram_fc09), A ; = 0
-    LD (DAT_ram_fc0b), A ; = 0
+    LD (fdc_set_flag), A ; = No
+    LD (pending_count), A ; = 0
     LD A, disk_density_double
     LD (disk_density), A
     LD A, disk_active_track_undefined
@@ -533,7 +548,7 @@ EP_SETSEC:
     LD A, (disk_density)
     OR A
     ; No, send the sector to the controller
-    JP NZ, set_sector_in_fdc
+    JP NZ, fdc_set_sector
     ; Yes, we just store the sector number
     RET
 
@@ -549,7 +564,7 @@ EP_SETTRK:
     LD A, (disk_density)
     OR A
     ; No, send the track to the controller
-    JP NZ, seek_track
+    JP NZ, fdc_seek_track
     ; Yes, we just store the track number
     RET
 
@@ -558,7 +573,7 @@ EP_HOME:
     LD A, (disk_density)
     OR A
     ; No, go to track 0 and return
-    JP NZ, seek_track_0
+    JP NZ, fdc_seek_track_0
     ; Yes.
     ; Is fc0a different to 0??
     LD A,(DAT_ram_fc0a)
@@ -566,9 +581,9 @@ EP_HOME:
     ; Yes, skip update
     JP NZ,skip_update_fc09
     ; No, update fc09 ??
-    LD (DAT_ram_fc09),A
+    LD (fdc_set_flag),A ; = No
 skip_update_fc09:
-    JP seek_track_0
+    JP fdc_seek_track_0
 
 EP_READ:
     ; Is disk double density?
@@ -580,153 +595,161 @@ EP_READ:
     ; EP_SETTRK did not send the info to the fdc for double density.
     ; Init variables
     XOR A
-    LD (DAT_ram_fc0b),A ; = 0
-    LD A,0x1
-    LD (DAT_ram_fc12),A ; = 1
-    LD (DAT_ram_fc11),A ; = 1
-    LD A,0x2
-    LD (DAT_ram_fc13),A ; = 2
-    JP read_write_sector_cont
+    LD (pending_count),A ; = 0
+    ; Starting from here it is equal to read in Appendix G
+    LD A, operation_type_read
+    LD (operation_type), A; = operation_type_read
+    LD (read_needed_flag), A ; = read_needed
+    LD A, rw_type_read_or_unallocated_write
+    LD (rw_type),A
+    JP read_write_double_density
 
 EP_WRITE:
-    ; C is used, meaning?
+    ; C indicates the rw_type
     ; Is disk double density?
     LD A,(disk_density)
     OR A
     ; No, go directly to the write routine
     JP NZ, write_single_density_relocated
     ; Yes, some preparation is needed as the calls to EP_SETSEC and
-    ; set_track did not send the info to the fdc on double density 
+    ; set_track did not send the info to the fdc on double density.
+    ; Starting from here it is equal to read in Appendix G
     XOR A
-    LD (DAT_ram_fc12),A ; = 0
+    LD (operation_type), A ; = operation_type_write
     LD A,C
-    LD (DAT_ram_fc13),A ; = C
-    CP 0x2
-    ; When param C is 0x2 we will copy the disk, track, and sector 
-    JP NZ, write_sector_skip_DTS_copy
-    LD A,0x8
-    LD (DAT_ram_fc0b),A ; = 8
-    ; DTS_for_DD_write = DTS_selected
+    LD (rw_type),A ; = C
+    CP rw_type_read_or_unallocated_write
+    ; It's an allocated write, we can skip reset the
+    ; unallocated params to check if a read is needed.
+    JP NZ, write_check_read_needed
+    LD A, double_density_sector_size / logical_sector_size ; 8
+    LD (pending_count),A ; = 8
+    ; Initialize the unallocated params
     LD A, (drive_selected)
-    LD (drive_for_DD_write), A
+    LD (drive_unallocated), A
     LD HL, (track_selected)
-    LD (track_for_DD_write), HL
+    LD (track_unallocated), HL
     LD A, (sector_selected)
-    LD (sector_for_DD_write), A
-write_sector_skip_DTS_copy:
-    ; Is fc0b = 0? WHY?
-    LD A,(DAT_ram_fc0b)
+    LD (sector_unallocated), A
+write_check_read_needed:
+    ; Do we have pending logical sectors?
+    LD A,(pending_count)
     OR A
-    ; Yes, the xxx is zero
-    JP Z, write_sector_skip_sector_increase
-    ; No
+    ; No, skip
+    JP Z, write_with_read_needed
+    ; Yes, there are more unallocated records remaining
     DEC A
-    LD (DAT_ram_fc0b),A ; --
-    ; Is drive requested different to the ¿internal? ?
+    LD (pending_count),A ; pending_count-1
+    ; Is drive requested different to the unallocated?
     LD A, (drive_selected)
-    LD HL, drive_for_DD_write
+    LD HL, drive_unallocated
     CP (HL)
     ; Yes, the drive is different
-    JP NZ, write_sector_skip_sector_increase
-    ; Is track requested different to the ¿internal? ?
-    LD HL, track_for_DD_write
+    JP NZ, write_with_read_needed
+    ; The drives are the same
+    ; Is track requested different to the unallocated?
+    LD HL, track_unallocated
     CALL is_track_equal_to_track_selected
     ; Yes, the track is different
-    JP NZ, write_sector_skip_sector_increase
-    ; Is sector requested different to the ¿internal? ?
+    JP NZ, write_with_read_needed
+    ; The tracks are the same
+    ; Is sector requested different to the unallocated?
     LD A, (sector_selected)
-    LD HL, sector_for_DD_write
+    LD HL, sector_unallocated
     CP (HL)
     ; Yes, the sector is different
-    JP NZ, write_sector_skip_sector_increase
-    ; DTS on the ¿internal? variables match the requested DTS
-    ; Advance to the next sector
+    JP NZ, write_with_read_needed
+    ; The sectors are the same
+    ; DTS on the unallocated variables match the requested DTS
+    ; Advance to the next sector to check if the next write will
+    ; be of the next sector.
     INC (HL)
     ; Are we at the end of the track?
     LD A,(HL)
     CP sectors_per_track_double_density
     ; No
-    JP C, write_sector_skip_track_increase
+    JP C, write_with_read_not_needed
     ; Yes, increase track and set sector to zero
     LD (HL),0x0
-    LD HL, (track_for_DD_write)
+    LD HL, (track_unallocated)
     INC HL
-    LD (track_for_DD_write),HL
-write_sector_skip_track_increase:
+    LD (track_unallocated),HL
+write_with_read_not_needed:
     XOR A
-    LD (DAT_ram_fc11),A ; = 0
-    JP read_write_sector_cont
-write_sector_skip_sector_increase:
+    LD (read_needed_flag),A ; = read_not_needed
+    JP read_write_double_density
+write_with_read_needed:
     XOR A
-    LD (DAT_ram_fc0b),A ; = 0
+    LD (pending_count),A ; = 0
     INC A
-    LD (DAT_ram_fc11),A ; = 1
+    LD (read_needed_flag),A ; = read_needed
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; FLOPPY DISK INTERNAL IMPLEMENTATION READ AND WRITE
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
     
-read_write_sector_cont:
+read_write_double_density:
     ; Reset the result variable
     XOR A
     LD (rw_result),A ; = 0
     ; Translate the sector logical address to the double density
     ; address. As sector in DD are four times the size of sector
-    ; in SD, we divide by 4 (or shift right twice)
+    ; in SD, we divide by 4 (or shift right twice).
+    ; Sure? Ono some places its 8 times ???
     LD A, (sector_selected)
     OR A
     RRA
     OR A
     RRA
     LD (dd_sector_selected),A ; sector_selected / 4
-    ; Is fc09 = 0? and set to 1. WHY??
-    LD HL,DAT_ram_fc09
+    ; Is fcd_position updated
+    LD HL, fdc_set_flag
     LD A,(HL)
-    LD (HL),0x1
+    LD (HL),0x1 ; fdc_set_flag = Yes
     OR A
-    ; Yes fc09 was zero (and now 1)
-    JP Z,copy_requested_DTS_to_xx
-    ; Is drive requested different to the xx?
+    ; No, continue after updating the DTS_in_fdc variables
+    JP Z, rw_fdc_not_set
+    ; Yes
+    ; Are the fdc variables different from the selected?
     LD A,(drive_selected)
-    LD HL, ram_fc04_drive_xx
+    LD HL, drive_in_fdc
     CP (HL)
     ; Yes, the drive is different
-    JP NZ, read_write_DTS_different_to_xx
+    JP NZ, rw_fdc_mismatch
     ; Is track requested different to the xx?
-    LD HL, ram_fc05_track_xx
+    LD HL, track_in_fdc
     CALL is_track_equal_to_track_selected
     ; Yes, the track is different
-    JP NZ, read_write_DTS_different_to_xx
+    JP NZ, rw_fdc_mismatch
     ; Is sector requested equals to the xx?
     LD A, (dd_sector_selected)
-    LD HL, ram_fc07_dd_sector_xx
+    LD HL, sector_in_fdc
     CP (HL)
     ; Yes, the sector is equal
-    JP Z, read_write_DTS_equals_to_xx
-read_write_DTS_different_to_xx:
+    JP Z, rw_fdc_set
+rw_fdc_mismatch:
     ; Is fc0a not zero? WHY?
     LD A,(DAT_ram_fc0a)
     OR A
     ; Yes, read/write the fc0a is not zero
     CALL NZ, read_write_sector_internal
     ; Now we need to init the xx variables
-copy_requested_DTS_to_xx:
+rw_fdc_not_set:
     ; DTS_xx = DTS_selected
     LD A, (drive_selected)
-    LD (ram_fc04_drive_xx),A
+    LD (drive_in_fdc),A
     LD HL, (track_selected)
-    LD (ram_fc05_track_xx),HL
+    LD (track_in_fdc),HL
     LD A,(dd_sector_selected)
-    LD (ram_fc07_dd_sector_xx),A
-    ; Is fc11 not zero? WHY?
-    LD A,(DAT_ram_fc11)
+    LD (sector_in_fdc),A
+    ; Is a read needed
+    LD A,(read_needed_flag)
     OR A
-    ; Not zero
+    ; Yes, read to fill the buffer
     CALL NZ, read_xx_to_buffer_with_retries
-    ; Is zero
     XOR A
     LD (DAT_ram_fc0a),A ; = 0
-read_write_DTS_equals_to_xx:
+rw_fdc_set:
     ; Calculate the sector buffer to use for this sector   
     LD A, (sector_selected)
     AND 0x3 ; mod 4
@@ -744,19 +767,20 @@ read_write_DTS_equals_to_xx:
     ; HL = 0xfc16 + (sector mod 4) * logical_sector_size
     LD DE,(disk_DMA_address)
     LD BC,logical_sector_size
-    LD A,(DAT_ram_fc12)
+    LD A,(operation_type)
     OR A
-    JR NZ,LAB_ram_02f8
+    ; Skip fc0a for reads
+    JR NZ, read_write_skip_fc0a
     LD A,0x1
     LD (DAT_ram_fc0a),A ; = 1
     EX DE,HL
-LAB_ram_02f8:
+read_write_skip_fc0a:
     ; Copy a sector from the buffer to the DMA
     CALL move_RAM_relocated
-    LD A,(DAT_ram_fc13)
-    CP 0x1
-    LD A,(rw_result)
-    ; Return if fc13 is not zero
+    LD A, (rw_type)
+    CP rw_type_directory_write
+    LD A, (rw_result)
+    ; Return if it is not a directory write
     RET NZ
     OR A
     ; Return if last read/write had an error
@@ -897,7 +921,7 @@ set_double_density_disk:
     LD (HL),A
     ; Store the current disk density
     LD (disk_density),A
-    JR init_drive_end
+    JR fdc_init_drive
 
 set_single_density_disk:
     ; HL is disk_parameter_header
@@ -923,7 +947,11 @@ set_single_density_disk:
     ; Store the current disk density
     LD (disk_density),A
 
-init_drive_end:
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; FLOPPY DISK CONTROLLER ACCESS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+fdc_init_drive:
     POP DE ; DE is disk_active_track_drive_x
     POP HL ; HL is disk_parameter_header
     ; Why set track with the sector value????
@@ -942,14 +970,14 @@ fdc_read_address:
     BIT fdc_status_record_not_found_bit, A
     RET
 
-seek_track_0:
+fdc_seek_track_0:
     CALL prepare_drive
     ; Restore controller
     LD A, fdc_command_restore
     OUT (io_10_fdc_command), A
     JR wait_for_result
 
-seek_track:
+fdc_seek_track:
     ; C: track number
     CALL prepare_drive
     LD A,C
@@ -959,7 +987,7 @@ seek_track:
     OUT (io_10_fdc_command),A
     JR wait_for_result
 
-set_sector_in_fdc:
+fdc_set_sector:
     ; C = sector
     LD A,C
     OUT (io_12_fdc_sector),A
@@ -1079,7 +1107,7 @@ read_write_sector_internal_retry:
 read_write_sector_internal_loop:
     PUSH HL
     PUSH DE
-    CALL go_to_DTS_xx
+    CALL fcd_seek_sector
     CALL write_from_buffer_relocated
     POP DE
     POP HL
@@ -1088,7 +1116,7 @@ read_write_sector_internal_loop:
     JR NZ, read_write_sector_internal_loop
     DEC D
     JR Z, process_result
-    CALL seek_track_0
+    CALL fdc_seek_track_0
     LD E,0xf
     JR read_write_sector_internal_loop
 discard_512_bytes:
@@ -1126,7 +1154,7 @@ read_xx_to_buffer_with_retries:
     LD DE,0x040f ; retry 15 times without seek. Repeat all up to 4 times with seek0
 read_retry:
     PUSH DE
-    CALL go_to_DTS_xx
+    CALL fcd_seek_sector
     ; Read 512 bytes
     CALL read_to_buffer_relocated
     LD (rw_result), A
@@ -1140,20 +1168,21 @@ read_retry:
     ; Do not retry anymore
     RET Z
     ; Mode the head to track 0 to retry makeing sure the head is moved.
-    CALL seek_track_0
+    CALL fdc_seek_track_0
     ; 
     LD E,0xf
     JR read_retry
 
-go_to_DTS_xx:
-    LD A,(ram_fc04_drive_xx)
+fcd_seek_sector:
+    ; Put the disk to the requested position
+    LD A,(drive_in_fdc)
     LD C,A
     CALL init_drive
-    LD BC,(ram_fc05_track_xx)
-    CALL seek_track
-    LD A,(ram_fc07_dd_sector_xx)
+    LD BC,(track_in_fdc)
+    CALL fdc_seek_track
+    LD A,(sector_in_fdc)
     LD C,A
-    CALL set_sector_in_fdc
+    CALL fdc_set_sector
     RET
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
