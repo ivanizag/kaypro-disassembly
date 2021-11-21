@@ -85,7 +85,6 @@
 0000			double_density_sector_size:         EQU 1024 ; See NOTES 
 0000			sectors_per_track_double_density:   EQU 40 ; See NOTES 
 0000			disk_count:                         EQU 2 ; 0 is A: and 1 is B: 
-0000			read_write_retries:                 EQU 3 
 0000			 
 0000			fdc_command_restore:                EQU 0x00 
 0000			fdc_command_read_address:           EQU 0xc4 
@@ -137,7 +136,7 @@
 0000			 
 0000			dd_sector_selected:              EQU 0xfc08 ; the double density sector is sector_selected / 4 
 0000			fdc_set_flag:                    EQU 0xfc09 ; 'hstact' 
-0000			DAT_ram_fc0a:                    EQU 0xfc0a ; 'hstwrt' 
+0000			pending_write_flag:              EQU 0xfc0a ; 'hstwrt' 
 0000			 
 0000			pending_count:                   EQU 0xfc0b 
 0000			drive_unallocated:               EQU 0xfc0c 
@@ -163,6 +162,7 @@
 0000			disk_DMA_address:                EQU 0xfc14 ; 2 bytes 
 0000			 
 0000			; There are 4 sector buffers. To select the buffer we get the sector modulo 4 
+0000			sector_buffer_base:             EQU 0xfc16 
 0000			sector_buffer_0:                EQU 0xfc16 
 0000			sector_buffer_1:                EQU 0xfc16 + logical_sector_size 
 0000			sector_buffer_2:                EQU 0xfc16 + logical_sector_size * 2 
@@ -576,14 +576,14 @@
 01dc			    ; No, go to track 0 and return 
 01dc c2 cb 03		    JP NZ, fdc_seek_track_0 
 01df			    ; Yes. 
-01df			    ; Is fc0a different to 0?? 
-01df 3a 0a fc		    LD A,(DAT_ram_fc0a) 
+01df			    ; Is a write pending? 
+01df 3a 0a fc		    LD A,(pending_write_flag) 
 01e2 b7			    OR A 
 01e3			    ; Yes, skip update 
-01e3 c2 e9 01		    JP NZ,skip_update_fc09 
-01e6			    ; No, update fc09 ?? 
+01e3 c2 e9 01		    JP NZ, skip_buffer_discard 
+01e6			    ; No, discard the buffer 
 01e6 32 09 fc		    LD (fdc_set_flag),A ; = No 
-01e9			skip_update_fc09: 
+01e9			skip_buffer_discard: 
 01e9 c3 cb 03		    JP fdc_seek_track_0 
 01ec			 
 01ec			EP_READ: 
@@ -698,12 +698,12 @@
 027d			    ; in SD, we divide by 4 (or shift right twice). 
 027d			    ; Sure? Ono some places its 8 times ??? 
 027d 3a 03 fc		    LD A, (sector_selected) 
-0280 b7			    OR A 
-0281 1f			    RRA 
-0282 b7			    OR A 
-0283 1f			    RRA 
+0280 b7			    OR A ; Clear carry 
+0281 1f			    RRA ; /2 
+0282 b7			    OR A ; Clear carry 
+0283 1f			    RRA ; /2 
 0284 32 08 fc		    LD (dd_sector_selected),A ; sector_selected / 4 
-0287			    ; Is fcd_position updated 
+0287			    ; Is fcd_position set 
 0287 21 09 fc		    LD HL, fdc_set_flag 
 028a 7e			    LD A,(HL) 
 028b 36 01		    LD (HL),0x1 ; fdc_set_flag = Yes 
@@ -729,14 +729,14 @@
 02ab			    ; Yes, the sector is equal 
 02ab ca d2 02		    JP Z, rw_fdc_set 
 02ae			rw_fdc_mismatch: 
-02ae			    ; Is fc0a not zero? WHY? 
-02ae 3a 0a fc		    LD A,(DAT_ram_fc0a) 
+02ae			    ; Is there a pending write on the buffer 
+02ae 3a 0a fc		    LD A, (pending_write_flag) 
 02b1 b7			    OR A 
-02b2			    ; Yes, read/write the fc0a is not zero 
-02b2 c4 39 04		    CALL NZ, read_write_sector_internal 
-02b5			    ; Now we need to init the xx variables 
+02b2			    ; Yes, write the buffer before continuing 
+02b2 c4 39 04		    CALL NZ, write_from_buffer_with_retries 
+02b5			    ; Now we can init the _in_fdc variables 
 02b5			rw_fdc_not_set: 
-02b5			    ; DTS_xx = DTS_selected 
+02b5			    ; DTS_in_fdc = DTS_selected 
 02b5 3a 00 fc		    LD A, (drive_selected) 
 02b8 32 04 fc		    LD (drive_in_fdc),A 
 02bb 2a 01 fc		    LD HL, (track_selected) 
@@ -747,9 +747,9 @@
 02c7 3a 11 fc		    LD A,(read_needed_flag) 
 02ca b7			    OR A 
 02cb			    ; Yes, read to fill the buffer 
-02cb c4 77 04		    CALL NZ, read_xx_to_buffer_with_retries 
+02cb c4 77 04		    CALL NZ, read_to_buffer_with_retries 
 02ce af			    XOR A 
-02cf 32 0a fc		    LD (DAT_ram_fc0a),A ; = 0 
+02cf 32 0a fc		    LD (pending_write_flag),A ; = no pending write 
 02d2			rw_fdc_set: 
 02d2			    ; Calculate the sector buffer to use for this sector    
 02d2 3a 03 fc		    LD A, (sector_selected) 
@@ -763,32 +763,36 @@
 02de 29			    ADD HL,HL ; *2 
 02df 29			    ADD HL,HL ; *2 
 02e0 29			    ADD HL,HL ; *2. Combined *128 
-02e1 11 16 fc		    LD DE, sector_buffer_0 
+02e1 11 16 fc		    LD DE, sector_buffer_base 
 02e4 19			    ADD HL,DE 
-02e5			    ; HL = 0xfc16 + (sector mod 4) * logical_sector_size 
+02e5			    ; HL = sector_buffer_base + (sector mod 4) * logical_sector_size 
 02e5 ed 5b 14 fc	    LD DE,(disk_DMA_address) 
 02e9 01 80 00		    LD BC,logical_sector_size 
+02ec			    ; 
 02ec 3a 12 fc		    LD A,(operation_type) 
 02ef b7			    OR A 
-02f0			    ; Skip fc0a for reads 
-02f0 20 06		    JR NZ, read_write_skip_fc0a 
+02f0			    ; Yes, it's a read, skip write related coe 
+02f0 20 06		    JR NZ, copy_block_to_or_from_buffer 
 02f2 3e 01		    LD A,0x1 
-02f4 32 0a fc		    LD (DAT_ram_fc0a),A ; = 1 
+02f4 32 0a fc		    LD (pending_write_flag),A ; = 1 
+02f7			    ; Reverse the block copy direction 
 02f7 eb			    EX DE,HL 
-02f8			read_write_skip_fc0a: 
+02f8			copy_block_to_or_from_buffer: 
 02f8			    ; Copy a sector from the buffer to the DMA 
 02f8 cd cd fe		    CALL move_RAM_relocated 
 02fb 3a 13 fc		    LD A, (rw_type) 
 02fe fe 01		    CP rw_type_directory_write 
 0300 3a 10 fc		    LD A, (rw_result) 
-0303			    ; Return if it is not a directory write 
+0303			    ; Return if it is a read or a normal write 
 0303 c0			    RET NZ 
 0304 b7			    OR A 
 0305			    ; Return if last read/write had an error 
 0305 c0			    RET NZ 
+0306			    ; It is a directory write. Le's not wait and 
+0306			    ; save to disk now. (to be more reliable?) 
 0306 af			    XOR A 
-0307 32 0a fc		    LD (DAT_ram_fc0a),A ; = 0 
-030a cd 39 04		    CALL read_write_sector_internal 
+0307 32 0a fc		    LD (pending_write_flag),A ; = 0 
+030a cd 39 04		    CALL write_from_buffer_with_retries 
 030d 3a 10 fc		    LD A,(rw_result) 
 0310 c9			    RET 
 0311			 
@@ -1088,6 +1092,8 @@
 0431			 
 0431			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0431			; FLOPPY DISK INTERNAL MORE IMPLEMENTATION READ AND WRITE 
+0431			; 
+0431			; Actual read and write used by the Appendix G algorithm 
 0431			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0431			 
 0431			wait_for_result: 
@@ -1100,37 +1106,41 @@
 0436 20 fa		    JR NZ,wait_while_busy 
 0438 c9			    RET 
 0439			 
-0439			read_write_sector_internal: 
-0439			    ; retry 3 times before giving up 
-0439 2e 03		    LD L, read_write_retries 
-043b			read_write_sector_internal_retry: 
-043b 11 0f 04		    LD DE,0x040f 
-043e			read_write_sector_internal_loop: 
+0439			write_from_buffer_with_retries: 
+0439 2e 03		    LD L, 3 ; retry 3 times if verification fails 
+043b			write_full_retry: 
+043b 11 0f 04		    LD DE,0x040f ; retry 15 times without seek. Repeat all up to 4 times with seek0 
+043e			write_retry: 
 043e e5			    PUSH HL 
 043f d5			    PUSH DE 
 0440 cd 92 04		    CALL fcd_seek_sector 
 0443 cd f4 fe		    CALL write_from_buffer_relocated 
 0446 d1			    POP DE 
 0447 e1			    POP HL 
-0448 28 0d		    JR Z, discard_512_bytes 
+0448			    ; If write success, verify the write 
+0448 28 0d		    JR Z, verify_write 
 044a 1d			    DEC E 
-044b 20 f1		    JR NZ, read_write_sector_internal_loop 
+044b			    ; Retry without moving the head home 
+044b 20 f1		    JR NZ, write_retry 
 044d 15			    DEC D 
+044e			    ; Do not retry anymore 
 044e 28 1c		    JR Z, process_result 
+0450			    ; Mode the head to track 0 to retry making sure the head is moved. 
 0450 cd cb 03		    CALL fdc_seek_track_0 
 0453 1e 0f		    LD E,0xf 
-0455 18 e7		    JR read_write_sector_internal_loop 
-0457			discard_512_bytes: 
-0457 06 00		    LD B,0x0 ; read 256 bytes 
+0455 18 e7		    JR write_retry 
+0457			 
+0457			verify_write: 
+0457 06 00		    LD B,0x0 ; loop for 256 bytes 
 0459 3e 88		    LD A, fdc_command_read_sector 
 045b d3 10		    OUT (io_10_fdc_command),A 
 045d			read_first_256_bytes_loop: 
-045d			    ; Read and discard 256 bytes (B from 0 and batck to 0) 
+045d			    ; Test read 256 bytes (B from 0 and back to 0) 
 045d 76			    HALT 
 045e db 13		    IN A,(io_13_fdc_data) 
 0460 10 fb		    DJNZ read_first_256_bytes_loop 
 0462			read_second_256_bytes_loop: 
-0462			    ; Read and discard 256 bytes (B from 0 and batck to 0) 
+0462			    ; Test read 256 bytes (B from 0 and back to 0) 
 0462 76			    HALT 
 0463 db 13		    IN A,(io_13_fdc_data) 
 0465 10 fb		    DJNZ read_second_256_bytes_loop 
@@ -1143,12 +1153,12 @@
 046f c8			    RET Z 
 0470			    ; If we have retries lett, retry 
 0470 2d			    DEC L 
-0471 20 c8		    JR NZ,read_write_sector_internal_retry 
+0471 20 c8		    JR NZ, write_full_retry 
 0473			    ; No more retries, exit with error ff 
 0473 3e ff		    LD A,0xff 
 0475 18 f5		    JR process_result 
 0477			 
-0477			read_xx_to_buffer_with_retries: 
+0477			read_to_buffer_with_retries: 
 0477			    ; Load a full 512 bytes double density sector in the buffer. 
 0477			    ; It is retried 15*4 times. Every 15 tries the head is fully moved 
 0477			    ; to track 0 and moved to the requested track. 
@@ -1168,9 +1178,8 @@
 0489 15			    DEC D 
 048a			    ; Do not retry anymore 
 048a c8			    RET Z 
-048b			    ; Mode the head to track 0 to retry makeing sure the head is moved. 
+048b			    ; Mode the head to track 0 to retry making sure the head is moved. 
 048b cd cb 03		    CALL fdc_seek_track_0 
-048e			    ;  
 048e 1e 0f		    LD E,0xf 
 0490 18 e8		    JR read_retry 
 0492			 
@@ -1211,7 +1220,7 @@
 04bc 18 05		    JR reloc_read_internal 
 04be			reloc_read_to_buffer: 
 04be			    ; Read 512 bytes into buffer 
-04be 21 16 fc		    LD HL, sector_buffer_0 
+04be 21 16 fc		    LD HL, sector_buffer_base 
 04c1 06 04		    LD B, rw_mode_double_density 
 04c3			reloc_read_internal: 
 04c3			    ; Configure RW for read 
@@ -1225,7 +1234,7 @@
 04cd 18 05		    JR reloc_write_internal 
 04cf			reloc_write_from_buffer: 
 04cf			    ; Write 512 bytes from buffer 
-04cf 21 16 fc		    LD HL, sector_buffer_0 
+04cf 21 16 fc		    LD HL, sector_buffer_base 
 04d2 06 04		    LD B, rw_mode_double_density 
 04d4			reloc_write_internal: 
 04d4			    ; Configure RW for write 
@@ -1256,7 +1265,7 @@
 04f2			    ; For rw_mode_double_density let's set B to zero 
 04f2 06 00		    LD B,0x0 
 04f4			read_rw_internal_cont: 
-04f4			    ; Is mode single density ? 
+04f4			    ; Is mode single density? 
 04f4 fe 01		    CP rw_mode_single_density 
 04f6 f5			    PUSH AF 
 04f7 7b			    LD A,E 
@@ -1298,7 +1307,7 @@
 051c			 
 051c			read_write_sector_completed: 
 051c			    ; Restore the byte that was on the NMI handler 
-051c 08			    EX AF,AF' ; ' 
+051c 08			    EX AF,AF' ; '  
 051d 32 66 00		    LD (nmi_isr),A 
 0520			    ; Restore the ROM 
 0520 db 1c		    IN A,(io_1c_system_bits) 
