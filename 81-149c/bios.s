@@ -28,18 +28,23 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; I/O Ports
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-io_04_serial_data:        EQU 0x04
-io_05_keyboard_data:      EQU 0x05
-io_06_serial_control:     EQU 0x06
-io_07_keyboard_control:   EQU 0x07
-io_08_parallel_data:      EQU 0x08
-io_10_fdc_status:         EQU 0x10 ; as IN it is a get status
-io_10_fdc_command:        EQU 0x10 ; as OUT it is a command
-io_11_fdc_track:          EQU 0x11
-io_12_fdc_sector:         EQU 0x12
-io_13_fdc_data:           EQU 0x13
-io_14_scroll_register:    EQU 0x14
-io_1c_system_bits:        EQU 0x1c
+io_00_serial_baud_rate:     EQU 0x00
+io_04_serial_data:          EQU 0x04
+io_05_keyboard_data:        EQU 0x05
+io_06_serial_control:       EQU 0x06
+io_07_keyboard_control:     EQU 0x07
+io_08_parallel_data:        EQU 0x08
+io_09_parallel_control:     EQU 0x09
+io_0b_parallel_b_control:   EQU 0x0b
+io_0c_keyboad_baud_rate:    EQU 0x0c
+io_10_fdc_status:           EQU 0x10 ; as IN it is a get status
+io_10_fdc_command:          EQU 0x10 ; as OUT it is a command
+io_11_fdc_track:            EQU 0x11
+io_12_fdc_sector:           EQU 0x12
+io_13_fdc_data:             EQU 0x13
+io_14_scroll_register:      EQU 0x14
+io_1c_system_bits:          EQU 0x1c
+io_1d_system_bits_control:  EQU 0x1d
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1331,35 +1336,43 @@ block_to_relocate_end:
 init_ports_count:
     DB 0x1C
 init_ports_data:
-    ; The first byte is the value to OUT on the port given by the second byte
-    DW 0x1807
-    DW 0x050C
-    DW 0x0407
-    DW 0x4407
-    DW 0x0307
-    DW 0xC107
-    DW 0x0507
-    DW 0xE807
-    DW 0x0107
-    DW 0x0007
-    DW 0x1806
-    DW 0x0500
-    DW 0x0406
-    DW 0x4406
-    DW 0x0306
-    DW 0xE106
-    DW 0x0506
-    DW 0xE806
-    DW 0x0106
-    DW 0x0006
-    DW 0x031D
-    DW 0x811C
-    DW 0xCF1D
-    DW 0x0C1D
-    DW 0x0309
-    DW 0x0F09
-    DW 0x030B
-    DW 0x4F0B
+    ; Keyboard, SIO-B. See Z80-SIO Technical Manual
+    DB io_07_keyboard_control, 0x18 ; Reset
+    DB io_0c_keyboad_baud_rate, 0x05 ; Set 8816 clock generator to 300 baud
+    DB io_07_keyboard_control, 0x04 ; WR4
+    DB io_07_keyboard_control, 0x44 ;   = 0x44, CLK/32, 1 Stop bit, no parity
+    DB io_07_keyboard_control, 0x03 ; WR3
+    DB io_07_keyboard_control, 0xC1 ;   = 0xc1, 8bits, RX enable
+    DB io_07_keyboard_control, 0x05 ; WR5
+    DB io_07_keyboard_control, 0xE8 ;   = 0xe8, 8bits TX, TX enable, DTR
+    DB io_07_keyboard_control, 0x01 ; WR1
+    DB io_07_keyboard_control, 0x00 ;   = 0x00, disable interrupts
+
+    ; Serial port, SIO-A. See Z80-SIO Technical Manual
+    DB io_06_serial_control, 0x18 ; Reset
+    DB io_00_serial_baud_rate, 0x05 ; Set 8816 clock generator to 300 baud
+    DB io_06_serial_control, 0x04 ; WR4
+    DB io_06_serial_control, 0x44 ;   = 0x44, CLK/32, 1 Stop bit, no parity
+    DB io_06_serial_control, 0x03 ; WR3
+    DB io_06_serial_control, 0xE1 ;   = 0xe1, 8bits, auto-enable, RX enable
+    DB io_06_serial_control, 0x05 ; WR5
+    DB io_06_serial_control, 0xE8 ;   = 0xe8, 8bits TX, TX enable, DTR
+    DB io_06_serial_control, 0x01 ; WR1
+    DB io_06_serial_control, 0x00 ;   = 0x00, disable interrupts
+
+    ; System bits, PIO-2A. See Z80-PIO Technical Manual
+    DB io_1d_system_bits_control, 0x03 ; Enable interrupts with AND
+    DB io_1c_system_bits, 0x81 ;  system_bits = 0x81, drive A, ROM enabled
+    DB io_1d_system_bits_control, 0xCF ; set mode 3-control
+    DB io_1d_system_bits_control, 0x0C ; direction = IIOO_OOOO
+
+    ; Parallel port, PIO-1A. See Z80-PIO Technical Manual
+    DB io_09_parallel_control, 0x03 ; Enable interrupts with AND
+    DB io_09_parallel_control, 0x0F ; set mode 0-output
+
+    ; Parallel port, PIO-1B. See Z80-PIO Technical Manual
+    DB io_0b_parallel_b_control, 0x03 ; Enable interrupts with AND
+    DB io_0b_parallel_b_control, 0x4F ; set mode 1-input
 EP_INITDEV:
     LD HL,init_ports_count
     LD B,(HL)
