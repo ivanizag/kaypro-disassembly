@@ -73,11 +73,11 @@
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; Console constants 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-0000			address_vram:        EQU 0x3000 
-0000			console_lines:       EQU 24 
-0000			console_columns:     EQU 80 
-0000			console_line_length: EQU 0x80                    ; There are 80 cols, but 128 bytes reserved for each line 
-0000			console_line_mask:   EQU 0x7f 
+0000			address_vram:                    EQU 0x3000 
+0000			console_lines:                   EQU 24 
+0000			console_columns:                 EQU 80 
+0000			console_line_length:             EQU 0x80 ; There are 80 cols, but 128 bytes reserved for each line 
+0000			console_line_mask:               EQU 0x7f 
 0000			 
 0000			address_vram_end:                EQU address_vram + console_lines * console_line_length -1 ; 0x3bff 
 0000			address_vram_start_of_last_line: EQU address_vram_end - console_line_length + 1            ; 0x3b80 
@@ -101,11 +101,10 @@
 0000			rw_mode_single_density: EQU 1 ; We read or write 128 bytes directly to/from DMA 
 0000			rw_mode_double_density: EQU 4 ; We read or write the full 512 bytes buffer 
 0000			 
-0000			 
-0000			fdc_status_record_busy_bit:      EQU 0 
-0000			fdc_status_record_not_found_bit: EQU 4 
-0000			fdc_status_read_error_bitmask:   EQU 0x9c ; Not ready, record not found, crc error or lost data 
-0000			fdc_status_write_error_bitmask:  EQU 0xfc ; Not ready, write_protect, write fault, record not found, crc error or lost data 
+0000			fdc_status_record_busy_bit:         EQU 0 
+0000			fdc_status_record_not_found_bit:    EQU 4 
+0000			fdc_status_read_error_bitmask:      EQU 0x9c ; Not ready, record not found, crc error or lost data 
+0000			fdc_status_write_error_bitmask:     EQU 0xfc ; Not ready, write_protect, write fault, record not found, crc error or lost data 
 0000			 
 0000			; RET, used to set the NMI_ISR when the ROM is disabled 
 0000			RET_opcode:	       EQU 0xC9 
@@ -130,41 +129,41 @@
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			 
 0000			; DTS with the user requested data. Uses losgical sectors of 128 bytes 
-0000			drive_selected:         EQU 0xfc00 
-0000			track_selected:         EQU 0xfc01 ; 2 bytes 
-0000			sector_selected:        EQU 0xfc03 
+0000			drive_selected:                 EQU 0xfc00 
+0000			track_selected:                 EQU 0xfc01 ; 2 bytes 
+0000			sector_selected:                EQU 0xfc03 
 0000			 
 0000			; DTS as understood by the floppy disk controller. Sectors are 512 bytes 
-0000			drive_in_fdc:           EQU 0xfc04 
-0000			track_in_fdc:           EQU 0xfc05 ; 2 bytes 
-0000			sector_in_fdc:          EQU 0xfc07 
+0000			drive_in_fdc:                   EQU 0xfc04 
+0000			track_in_fdc:                   EQU 0xfc05 ; 2 bytes 
+0000			sector_in_fdc:                  EQU 0xfc07 
 0000			 
-0000			dd_sector_selected:              EQU 0xfc08 ; the double density sector is sector_selected / 4 
-0000			fdc_set_flag:                    EQU 0xfc09 ; 'hstact' 
-0000			pending_write_flag:              EQU 0xfc0a ; 'hstwrt' 
+0000			dd_sector_selected:             EQU 0xfc08 ; the double density sector is sector_selected / 4 
+0000			fdc_set_flag:                   EQU 0xfc09 ; 'hstact' 
+0000			pending_write_flag:             EQU 0xfc0a ; 'hstwrt' 
 0000			 
-0000			pending_count:                   EQU 0xfc0b 
-0000			drive_unallocated:               EQU 0xfc0c 
-0000			track_unallocated:               EQU 0xfc0d ; 2 bytes 
-0000			sector_unallocated:              EQU 0xfc0f 
+0000			pending_count:                  EQU 0xfc0b 
+0000			drive_unallocated:              EQU 0xfc0c 
+0000			track_unallocated:              EQU 0xfc0d ; 2 bytes 
+0000			sector_unallocated:             EQU 0xfc0f 
 0000			 
-0000			rw_result:                       EQU 0xfc10 
+0000			rw_result:                      EQU 0xfc10 
 0000			 
-0000			read_needed_flag:                EQU 0xfc11 
-0000			read_not_needed:                 EQU 0 
-0000			read_needed:                     EQU 1 
+0000			read_needed_flag:               EQU 0xfc11 
+0000			read_not_needed:                EQU 0 
+0000			read_needed:                    EQU 1 
 0000			 
 0000			; See CP/M 2.2 System alteration guide appendix G 
-0000			operation_type:                  EQU 0xfc12 ; 'readop' in appendix G 
-0000			operation_type_write:            EQU 0 
-0000			operation_type_read:             EQU 1 
+0000			operation_type:                 EQU 0xfc12 ; 'readop' in appendix G 
+0000			operation_type_write:           EQU 0 
+0000			operation_type_read:            EQU 1 
 0000			 
 0000			; See CP/M 2.2 System alteration guide, section 12 and appendix G 
-0000			rw_type:                         EQU 0xfc13 ; 'wrtype' in appendix G 
+0000			rw_type:                        EQU 0xfc13 ; 'wrtype' in appendix G 
 0000			rw_type_normal_write:              EQU 0 ; write to allocated 
 0000			rw_type_directory_write:           EQU 1 
 0000			rw_type_read_or_unallocated_write: EQU 2 ; write to unallocated 
-0000			disk_DMA_address:                EQU 0xfc14 ; 2 bytes 
+0000			disk_DMA_address:               EQU 0xfc14 ; 2 bytes 
 0000			 
 0000			; There are 4 sector buffers. To select the buffer we get the sector modulo 4 
 0000			sector_buffer_base:             EQU 0xfc16 
@@ -181,22 +180,21 @@
 0000			disk_active_track_drive_b:      EQU 0xfe19 
 0000			disk_active_track_undefined:    EQU 0xff 
 0000			 
-0000			 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; Console related variables 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-0000			console_esc_mode:            EQU 0xfe6c 
-0000			console_esc_mode_clear:      EQU 0               ; No ESC pending 
-0000			console_esc_mode_enabled:    EQU 1               ; Next char is the ESC command 
-0000			console_esc_mode_arg_1:      EQU 2               ; Next char is the first arg of the = command 
-0000			console_esc_mode_arg_2:      EQU 3               ; Next char is the second arg of the = command 
-0000			console_esc_equal_first_arg: EQU 0xfe6d          ; First arg of the esc= command 
-0000			console_cursor_position:     EQU 0xfe6e          ; 2 bytes 
+0000			console_esc_mode:               EQU 0xfe6c 
+0000			console_esc_mode_clear:         EQU 0 ; No ESC pending 
+0000			console_esc_mode_enabled:       EQU 1 ; Next char is the ESC command 
+0000			console_esc_mode_arg_1:         EQU 2 ; Next char is the first arg of the = command 
+0000			console_esc_mode_arg_2:         EQU 3 ; Next char is the second arg of the = command 
+0000			console_esc_equal_first_arg:    EQU 0xfe6d ; First arg of the esc= command 
+0000			console_cursor_position:        EQU 0xfe6e ; 2 bytes 
 0000			 
 0000			; On greek mode, the char is converted to a control char that is printed as a greek letter 
-0000			console_alphabet_mask:       EQU 0xfe70 
-0000			console_alphabet_ascii_mask: EQU 0x7f 
-0000			console_alphabet_greek_mask: EQU 0x1f 
+0000			console_alphabet_mask:          EQU 0xfe70 
+0000			console_alphabet_ascii_mask:    EQU 0x7f 
+0000			console_alphabet_greek_mask:    EQU 0x1f 
 0000			 
 0000			 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
@@ -215,7 +213,7 @@
 0000			move_RAM_relocated:             EQU 0xfecd           ; reloc_move_RAM + relocation_offset 
 0000			read_to_buffer_relocated:       EQU 0xfee3           ; reloc_read_to_buffer + relocation_offset 
 0000			write_from_buffer_relocated:    EQU 0xfef4           ; reloc_write_from_buffer + relocation_offset 
-0000			write_single_density_relocated: EQU 0xfeed         ; reloc_write_single_density + relocation_offset 
+0000			write_single_density_relocated: EQU 0xfeed           ; reloc_write_single_density + relocation_offset 
 0000			 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; Other addresses 
