@@ -86,3 +86,12 @@ If greek mode is set (with ESC-G), lowercase characters are shown as greek lette
 - 0xff54-0xff72: BLANK?
 - 0xff73-0xfff3: Scratchpad for BDOS directory operations
 ```
+
+## References
+
+- [Kaypro II Theory of Operation](documentation/Kaypro%20II%20Theory%20of%20Operation%201983.pdf)
+- [CP/M 2.2 Alteration Guide](documentation/CPM_2.2_Alteration_Guide_1979.pdf)
+- [FD179X-02 Datasheet](documentation/FD179X-02_Data_Sheet_May1980.pdf)
+- [Zilog Z80-PIO Technical Manual](documentation/Zilog%20Z80-PIO%20Technical%20Manual.pdf)
+- [Zilog Z80-SIO Technical Manual](documentation/Zilog%20Z80-SIO%20Technical%20Manual.pdf)
+
