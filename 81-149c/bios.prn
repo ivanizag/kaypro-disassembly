@@ -474,27 +474,37 @@
 0153 53 fe		    DW ALV_1 
 0155 00			    DB 0x00 ; Used by the BIOS to store the disk density 
 0156			 
+0156			; Single density disk 
+0156			;   18 sectors (of 128 bytes) per track 
+0156			;   1024 bytes per allocation block 
+0156			;   83 kb total disk space 
+0156			;   40 tracks, 3 reserved 
 0156			init_disk_parameter_block_single_density: ; to 0xfe93 
 0156 12 00		    DW 18   ; SPT, sectors per track 
 0158 03			    DB 3    ; BSH, data alloc shift factor 
 0159 07			    DB 7    ; BLM 
 015a			    ; As BSH=3 and BLM=7, then BLS (data alocation size) is 1024. 
 015a 00			    DB 0    ; EXM, extent mask 
-015b 52 00		    DW 82   ; DSM, total storage 
-015d 1f 00		    DW 31   ; DRM, number of directory entries 
+015b 52 00		    DW 82   ; DSM, total storage in allocation blocks - 1 
+015d 1f 00		    DW 31   ; DRM, number of directory entries - 1 
 015f 80			    DB 0x80 ; AL0 
 0160 00			    DB 0x00 ; AL1 
 0161 08 00		    DW 8    ; CKS, directory check vector size 
 0163 03 00		    DW 3    ; OFF, number of reserved tracks 
 0165			 
+0165			; Single density disk 
+0165			;   40 sectors (128 bytes) per track 
+0165			;   1024 bytes per allocation block 
+0165			;   195 kb total disk space 
+0165			;   40 tracks, 1 reserved 
 0165			init_disk_parameter_block_double_density: ; to 0xfea2 
 0165 28 00		    DW 40   ; SPT, sectors per track 
 0167 03			    DB 3    ; BSH, data alloc shift factor 
 0168 07			    DB 7    ; BLM 
 0169			    ; As BSH=3 and BLM=7, then BLS (data alocation size) is 1024. 
 0169 00			    DB 0    ; EXM, extent mask 
-016a c2 00		    DW 194  ; DSM, total storage 
-016c 3f 00		    DW 63   ; DRM, number of directory entries 
+016a c2 00		    DW 194  ; DSM, total storage in allocation blocks - 1 
+016c 3f 00		    DW 63   ; DRM, number of directory entries - 1  
 016e f0			    DB 0xF0 ; AL0 
 016f 00			    DB 0x00 ; AL1 
 0170 10 00		    DW 16   ; CKS, directory check vector size 
