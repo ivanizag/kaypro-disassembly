@@ -504,7 +504,7 @@
 0169			    ; As BSH=3 and BLM=7, then BLS (data alocation size) is 1024. 
 0169 00			    DB 0    ; EXM, extent mask 
 016a c2 00		    DW 194  ; DSM, total storage in allocation blocks - 1 
-016c 3f 00		    DW 63   ; DRM, number of directory entries - 1  
+016c 3f 00		    DW 63   ; DRM, number of directory entries - 1 
 016e f0			    DB 0xF0 ; AL0 
 016f 00			    DB 0x00 ; AL1 
 0170 10 00		    DW 16   ; CKS, directory check vector size 
@@ -1797,7 +1797,7 @@
 073b			    ; A has the esc mode 
 073b			    ; C has the char to process 
 073b			    ; Push the location of a RET on the stack. A RET will be another RET? 
-073b 21 a2 07		    LD HL,0x07a2 
+073b 21 a2 07		    LD HL, ret_opcode_address 
 073e e5			    PUSH HL 
 073f			    ; Reset ESC mode 
 073f 21 6c fe		    LD HL,console_esc_mode 
@@ -1886,6 +1886,7 @@
 079e 77			    LD (HL),A 
 079f			    ; Store the cursor position 
 079f 22 6e fe		    LD (console_cursor_position),HL 
+07a2			ret_opcode_address: 
 07a2 c9			    RET 
 07a3			 
 07a3			esc_set_greek_mode: 

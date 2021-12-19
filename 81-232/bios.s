@@ -1,24 +1,34 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Analysis of the Kaypro II ROM
 ;
-; Based on 81-149c.rom
+; Based on 81-232.rom
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; NOTES:
 ;
-;   From the code it looks like there is support for single density
-; and double density disks. FM or MFM encoding respectively.
-;   The entrypoints interface show sectors as having 128 bytes.
-;   For single density the sector size is 128 bytes. The code can go
-; directly to the fdc (floppy disk controller, a WD MD1793).
-;   For double density the sector size is 512 bytes. To simulate the
-; smaller sectors the code reads 512 bytes in a buffer and copies
-; the relevant 128 bytes. To do so, the code is much more complex as
-; commands can't be sent directly to the fdc.
-;   Surprsingly, it looks like there was not a Kaypro ever sold with
-; single density disks. 
+;   The code if similar to the 81-149c ROM with the following
+; differences:
+;   - The welcome message says "Kaypro" instead of "Kaypro II"
+;   - Support for double sided doble density disks (DSDD)
+;   - The code goes 144 bytes beyong the 2KB limit and needs a 4KB
+; ROM. All the reamining spce is filled with FF.
+;   - The PIO-2A bit 6 is configured as output.
 ;
+;   To support the DSDD disks, a new disk parameter block. This
+; block is not copied to upper RAM as the SSSD and SSDD blocks were.
+; Instead the upper RAM copy of SSDD is replaced by the disk
+; parameter block for DSDD when needed. Also, the previously unused
+; system bit 2 is used to select single side or double side mode.
+;
+;   On the ROM 81.149c, the current track of both drives is stored
+; on two variables. Also, the densite detected for the current disk
+; on each drive is stored as an aditional 16th byte of the disk
+; parameter header. On this ROM, there is a need to store as well if
+; the disk is double sided. Current track, density and sides are now
+; stored per drive in the variables disk_active_info_drive_a and
+; disk_active_info_drive_b. It is copied bach an forth to
+; disk_active_info as A: or B: is selected. 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -52,7 +62,7 @@ io_1d_system_bits_control:  EQU 0x1d
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 system_bit_drive_a:                 EQU 0
 system_bit_drive_b:                 EQU 1
-system_bit_unused:                  EQU 2
+system_bit_side_2:                  EQU 2
 system_bit_centronicsReady:         EQU 3
 system_bit_centronicsStrobe:        EQU 4
 system_bit_double_density_neg:      EQU 5
@@ -61,7 +71,7 @@ system_bit_bank:                    EQU 7
 
 system_bit_drive_a_mask:            EQU 0x01
 system_bit_drive_b_mask:            EQU 0x02
-system_bit_unused_mask:             EQU 0x04
+system_bit_side_2_mask:             EQU 0x04
 system_bit_centronicsReady_mask:    EQU 0x08
 system_bit_centronicsStrobe_mask:   EQU 0x10
 system_bit_double_density_neg_mask: EQU 0x20
@@ -88,6 +98,7 @@ address_vram_start_of_last_line: EQU address_vram_end - console_line_length + 1 
 logical_sector_size:                EQU 128 ; See NOTES
 double_density_sector_size:         EQU 1024 ; See NOTES
 sectors_per_track_double_density:   EQU 40 ; See NOTES
+tracks_per_side:                    EQU 10 ; See NOTES
 disk_count:                         EQU 2 ; 0 is A: and 1 is B:
 
 fdc_command_restore:                EQU 0x00
@@ -172,26 +183,35 @@ sector_buffer_2:                EQU 0xfc16 + logical_sector_size * 2
 sector_buffer_3:                EQU 0xfc16 + logical_sector_size * 3
 
 disk_active_drive:              EQU 0xfe16
-disk_density:                   EQU 0xfe17
+; There are three bytes with the disk info: track, density, sides support
+disk_active_info:               EQU 0xfe17
+disk_active_info_undefined:     EQU 0xff
+disk_active_track:              EQU disk_active_info + 0
+disk_density:                   EQU disk_active_info + 1
 disk_density_double:            EQU 0x00 ; FM encoding
 disk_density_single:            EQU 0x20 ; MFM encoding
-disk_active_track_drive_a:      EQU 0xfe18
-disk_active_track_drive_b:      EQU 0xfe19
-disk_active_track_undefined:    EQU 0xff
+disk_active_has_sides:          EQU disk_active_info + 2
+disk_active_has_sides_no:       EQU 0x00
+disk_active_has_sides_yes:      EQU 0xff
+
+; Copy of the disk info for the drive A: (3 bytes)
+disk_active_info_drive_a:       EQU 0xfe1a ; 3 bytes copy of 0xfe17, 8 and 9
+; Copy of the disk info for the drive B: (3 bytes)
+disk_active_info_drive_b:       EQU 0xfe1d ; 3 bytes copy of 0xfe17, 8 and 9
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Console related variables
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-console_esc_mode:               EQU 0xfe6c
+console_esc_mode:               EQU 0xfe74
 console_esc_mode_clear:         EQU 0 ; No ESC pending
 console_esc_mode_enabled:       EQU 1 ; Next char is the ESC command
 console_esc_mode_arg_1:         EQU 2 ; Next char is the first arg of the = command
 console_esc_mode_arg_2:         EQU 3 ; Next char is the second arg of the = command
-console_esc_equal_first_arg:    EQU 0xfe6d ; First arg of the esc= command
-console_cursor_position:        EQU 0xfe6e ; 2 bytes
+console_esc_equal_first_arg:    EQU 0xfe75 ; First arg of the esc= command
+console_cursor_position:        EQU 0xfe76 ; 2 bytes
 
 ; On greek mode, the char is converted to a control char that is printed as a greek letter
-console_alphabet_mask:          EQU 0xfe70
+console_alphabet_mask:          EQU 0xfe78
 console_alphabet_ascii_mask:    EQU 0x7f
 console_alphabet_greek_mask:    EQU 0x1f
 
@@ -199,29 +219,33 @@ console_alphabet_greek_mask:    EQU 0x1f
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Entry points of code relocated to upper RAM
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-disk_params_destination:        EQU 0xfe71
-disk_parameter_header_0:        EQU 0xfe71
-disk_parameter_header_1:        EQU 0xfe82
-disk_parameter_block_single_density:    EQU 0xfe93
-disk_parameter_block_double_density:    EQU 0xfea2
-disk_sector_translation_table:  EQU 0xfeb1
+disk_params_destination:        EQU 0xfe79
+disk_parameter_header_0:        EQU 0xfe79
+disk_parameter_header_1:        EQU 0xfe8a
+disk_parameter_block_single_density:    EQU 0xfe9b
+disk_parameter_block_double_density:    EQU 0xfeaa
+disk_sector_translation_table:  EQU 0xfeb9
+disk_parameter_block_size:      EQU 15
+disk_read_address_buffer:       EQU 0xfecb
+disk_read_address_sector:       EQU 0xfecd
+disk_read_address_buffer_size:  EQU 6
 
-relocation_destination:         EQU 0xfecd
-relocation_offset:              EQU 0xfecd - 0x04a8  ; relocation_destination - block_to_relocate
-read_single_density_relocated:  EQU 0xfedc           ; reloc_single_density + relocation_offset
-move_RAM_relocated:             EQU 0xfecd           ; reloc_move_RAM + relocation_offset
-read_to_buffer_relocated:       EQU 0xfee3           ; reloc_read_to_buffer + relocation_offset
-write_from_buffer_relocated:    EQU 0xfef4           ; reloc_write_from_buffer + relocation_offset
-write_single_density_relocated: EQU 0xfeed           ; reloc_write_single_density + relocation_offset
+relocation_destination:         EQU 0xfed1
+relocation_offset:              EQU 0xfed1 - 0x03b   ; relocation_destination - block_to_relocate
+read_single_density_relocated:  EQU 0xfee0           ; reloc_single_density + relocation_offset
+move_RAM_relocated:             EQU 0xfed1           ; reloc_move_RAM + relocation_offset
+read_to_buffer_relocated:       EQU 0xfee7           ; reloc_read_to_buffer + relocation_offset
+write_from_buffer_relocated:    EQU 0xfef8           ; reloc_write_from_buffer + relocation_offset
+write_single_density_relocated: EQU 0xfef1           ; reloc_write_single_density + relocation_offset
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Other addresses
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-CSV_0:      EQU 0xfe1a ; Scrathpad for change disk check, drive 0
-ALV_0:      EQU 0xfe2a ; Scrathpad for BDOS disk allocation, drive 0
-CSV_1:      EQU 0xfe43 ; Scrathpad for change disk check, drive 1
-ALV_1:      EQU 0xfe53 ; Scrathpad for BDOS disk allocation, drive 1
-DIRBUF:     EQU 0xff73 ; Address of a 128 byte scratchpad for BDOS dir ops
+CSV_0:      EQU 0xfe20 ; Scrathpad for change disk check, drive 0
+ALV_0:      EQU 0xfe30 ; Scrathpad for BDOS disk allocation, drive 0
+CSV_1:      EQU 0xfe4a ; Scrathpad for change disk check, drive 1
+ALV_1:      EQU 0xfe5a ; Scrathpad for BDOS disk allocation, drive 1
+DIRBUF:     EQU 0xff6d ; Address of a 128 byte scratchpad for BDOS dir ops
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -356,7 +380,7 @@ EP_COLD:
     CALL EP_INITDSK
     ; Avoid the NMI entry point at 0x0066
     JR EP_COLD_continue                        
-    DB 0x3D, 0, 0, 0, 0, 0, 0
+    DB 0x3D, 0xC3, 0x3B, 0x2B, 0xAF, 0x32, 0x13
 
 nmi_isr:
     ; Just return from the interrupts generated
@@ -368,7 +392,7 @@ EP_COLD_continue:
     CALL console_write_string                    ; console_write_string uses the zero terminated
                                                  ; string after the CALL
     DB 1Bh,"=", 0x20 + 0xa, 0x20 + 0x1f          ; ESC code, move to line 10, column 31
-    DB "*    KAYPRO II    *"
+    DB "*     KAYPRO      *"
     DB 1Bh,"=", 0x20 + 0xd, 0x20 + 0x14          ; ESC code, move to line 13, column 20
     DB " Please place your diskette into Drive A"
     DB 0x8                                       ; Cursor
@@ -453,9 +477,9 @@ wait_forever:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; See CP/M 2.2 System alteration guide, section 10
 
-; This data will be copied starting 0xfe71
+; This data will be copied starting 0xfe79
 disk_params:
-init_disk_parameter_header_0: ; to 0xfe71
+init_disk_parameter_header_0: ; to 0xfe79
     DW 0x0000 ; XLT, logical translation table
     DW 0x0000, 0x0000, 0x0000 ; Scrathpad for BDOS
     DW DIRBUF ; Address of additional scratchpad for BDOS,
@@ -464,7 +488,7 @@ init_disk_parameter_header_0: ; to 0xfe71
     DW ALV_0
     DB 0x00 ; Used by the BIOS to store the disk density
 
-init_disk_parameter_header_1: ; to 0xfe82
+init_disk_parameter_header_1: ; to 0xfe8a
     DW 0x0000 ; XLT, logical translation table
     DW 0x0000, 0x0000, 0x0000 ; Scrathpad for BDOS
     DW DIRBUF ; Address of additional scratchpad for BDOS,
@@ -478,7 +502,7 @@ init_disk_parameter_header_1: ; to 0xfe82
 ;   1024 bytes per allocation block
 ;   83 kb total disk space
 ;   40 tracks, 3 reserved
-init_disk_parameter_block_single_density: ; to 0xfe93
+init_disk_parameter_block_single_density: ; to 0xfe9b
     DW 18   ; SPT, sectors per track
     DB 3    ; BSH, data alloc shift factor
     DB 7    ; BLM
@@ -496,7 +520,7 @@ init_disk_parameter_block_single_density: ; to 0xfe93
 ;   1024 bytes per allocation block
 ;   195 kb total disk space
 ;   40 tracks, 1 reserved
-init_disk_parameter_block_double_density: ; to 0xfea2
+init_disk_parameter_block_double_density: ; to 0xfeaa
     DW 40   ; SPT, sectors per track
     DB 3    ; BSH, data alloc shift factor
     DB 7    ; BLM
@@ -509,13 +533,26 @@ init_disk_parameter_block_double_density: ; to 0xfea2
     DW 16   ; CKS, directory check vector size
     DW 1    ; OFF, number of reserved tracks
 
-init_sector_translation_table: ; 0xfeb1
+init_sector_translation_table: ; 0xfeb9
     ; Only used for single density
     ; There is translation for 18 sectors.
     DB 1, 6, 11, 16, 3, 8, 13, 18
     DB 5, 10, 15, 2, 7, 12, 17, 4
     DB 9, 14
 disk_params_end:
+
+init_disk_parameter_block_double_density_double_side:
+    DW 40   ; SPT, sectors per track 
+    DB 4    ; BSH, data alloc shift factor 
+    DB 15   ; BLM
+    ; As BSH=4 and BLM=15, then BLS (data alocation size) is 2048.
+    DB 1    ; EXM, extent mask 
+    DW 196  ; DSM, total storage in allocation blocks - 1
+    DW 63   ; DRM, number of directory entries - 1
+    DB 0xC0 ; AL0
+    DB 0x00 ; AL1 
+    DW 16   ; CKS, directory check vector size
+    DW 1    ; OFF, number of reserved tracks
 
 EP_INITDSK:
     ; Copy relocatable disk access to upper RAM to
@@ -537,10 +574,10 @@ EP_INITDSK:
     LD (pending_count), A ; = 0
     LD A, disk_density_double
     LD (disk_density), A
-    LD A, disk_active_track_undefined
+    LD A, disk_active_info_undefined
     LD (disk_active_drive), A
-    LD (disk_active_track_drive_a), A
-    LD (disk_active_track_drive_b), A
+    LD (disk_active_info_drive_a), A
+    LD (disk_active_info_drive_b), A
     RET
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -852,67 +889,74 @@ disk_params_skip_for_drive_a:
     LD A,C
     LD (disk_active_drive),A
     OR A
-    ; Set the read_address_state to the disk param $10
-    ; The param default is disk_density_double
+    ; If the disk info for the drive is defined,
+    ; restore that as the active info
     PUSH HL
-    LD DE,0x10
-    ADD HL,DE
-    LD A,(HL)
-    LD (disk_density),A
-    ; Load active track for disk a or b
-    LD HL,disk_active_track_drive_b
-    JR Z, skip_for_drive_b
-    DEC HL ; HL is disk_active_track_drive_a
-skip_for_drive_b:
-    LD A,(HL)
-    ; Is the active track undefined?
-    CP disk_active_track_undefined
-    ; Yes, skip. Why????
-    JR Z, skip_get_track_number
-    ; No, get track number from the controller
-    IN A,(io_11_fdc_track)
-    LD (HL),A; HL is disk_active_track_drive_x
-skip_get_track_number:
+    LD HL, disk_active_info
+    LD DE, disk_active_info_drive_b
+    JR Z, save_previous_disk_info
+    LD DE, disk_active_info_drive_a
+save_previous_disk_info:
+    LD A, (DE)
+    ; Is the active info undefined?
+    CP disk_active_info_undefined
+    ; Yes, no need to save the info
+    JR Z, skip_save_disk_info
+    PUSH BC
+    ; Save the current disk info for the drive
+    LD BC, 0x3
+    LDIR
+    POP BC
+    LD DE, disk_active_info
+skip_save_disk_info:
     ; C is the disk number
     LD A,C
     OR A
-    ; Load active track for disk a or b
-    LD HL, disk_active_track_drive_a
-    JR Z, skip_for_drive_a
-    INC HL; HL is disk_active_track_drive_b
-skip_for_drive_a:
+    ; Load active info for disk a or b
+    LD HL, disk_active_info_drive_a
+    JR Z, load_previous_info
+    LD HL, disk_active_info_drive_b
+load_previous_info:
     LD A,(HL)
-    ; Send the requested track to the controller
-    OUT (io_11_fdc_track),A
-    EX DE,HL
+    ; Is the stored info undefined?
+    CP disk_active_info_undefined
+    ; Yes, the info is not cached, we need to analyze the disk
+    JR Z, analyze_inserted_disk
+    ; Restore the disk info
+    LD BC, 0x3
+    LDIR
+    ; Copy the required disk parameter block DDSD or DDDD
+    LD BC, disk_parameter_block_size
+    LD DE, disk_parameter_block_double_density
+    LD HL, init_disk_parameter_block_double_density
+    LD A, (disk_active_has_sides)
+    OR A
+    JR Z, skip_for_single_side
+    LD HL, init_disk_parameter_block_double_density_double_side
+skip_for_single_side:
+    LDIR ; Copy the parameter block
+    ; Restore the track position
+    LD A, (disk_active_track)
+    OUT (io_11_fdc_track), A
     POP HL
-    ; Is the active track undefined?
-    CP disk_active_track_undefined
-    ; No, we are done
-    RET NZ
-    ; Yes
+    RET
+
+analyze_inserted_disk:
+    POP HL
+    ; Try reading as double density disk
+    LD A, disk_density_double
+    LD (disk_density), A
     CALL prepare_drive
     CALL EP_HOME
-    ; Enable double density
-    IN A,(io_1c_system_bits)
-    AND ~system_bit_double_density_neg_mask          
-    OR 0x0
-    OUT (io_1c_system_bits),A
-    ; Can we read the address in double density?
     CALL fdc_read_address
-    ; Yes
+    ; If it reads the track, it is a double density disk
     JR Z, set_double_density_disk
-    ; No, retry with single density
-    ; Disbable double density
-    IN A,(io_1c_system_bits)
-    AND ~system_bit_double_density_neg_mask
-    OR system_bit_double_density_neg_mask
-    OUT (io_1c_system_bits),A
-    ; Can we read the address?
+    ; No, try reading as single density disk
+    LD A, disk_density_single
+    LD (disk_density), A
+    CALL prepare_drive
     CALL fdc_read_address
-    ; No, there is nothing we can do
-    RET NZ
-    ; Yes
+    RET NZ ; Return if it fails as single and double density disk
     JR set_single_density_disk
 
 set_double_density_disk:
@@ -931,14 +975,42 @@ set_double_density_disk:
     LD (HL),E
     INC HL
     LD (HL),D
-    ; Set disk_density_double in the disk param $10
-    LD DE,0x0005
-    ADD HL,DE
-    LD A, disk_density_double
-    LD (HL),A
-    ; Store the current disk density
-    LD (disk_density),A
-    JR fdc_init_drive
+    ; Select disk side 2, will be change to side 1 later.
+    IN A,(io_1c_system_bits)
+    OR system_bit_side_2_mask
+    OUT (io_1c_system_bits),A
+    ; Try reading on the side 2
+    CALL fdc_read_address
+    LD BC, disk_parameter_block_size
+    LD DE, disk_parameter_block_double_density
+    LD HL, init_disk_parameter_block_double_density
+    LD A, disk_active_has_sides_no
+    ; If it fails, side 2 is not readable we are for sure on a single side disk
+    JR NZ, second_side_analysis_completed
+    ; The previous fdc_read_address has not failed: there is valid
+    ; info on the side 2. 
+    ; We will see if the sector number to check if it is a single side disk
+    ; reversed or if it is the side 2 of a double sided disk.
+    ; As we have loaded the sector info, on the 3rd byte  we have the 
+    ; sector number. On a second side the sector goes from 10 to 29.
+    LD A, (disk_read_address_sector)
+    ; Is the sector number less than 10?
+    CP tracks_per_side
+    LD A, disk_active_has_sides_no
+    ; Yes it is less than 10, it's is not a two sided disk
+    JR C, second_side_analysis_completed
+    LD HL, init_disk_parameter_block_double_density_double_side
+    LD A, disk_active_has_sides_yes
+second_side_analysis_completed:
+    ; Store the result of the side analyis
+    LD (disk_active_has_sides), A
+    ; Copy the disk param block required DDSD or DDDD
+    LDIR
+    ; Go back to side 1
+    IN A,(io_1c_system_bits)
+    AND ~system_bit_side_2_mask
+    OUT (io_1c_system_bits),A
+    JR finish_set_single_or_double_density_disk
 
 set_single_density_disk:
     ; HL is disk_parameter_header
@@ -956,40 +1028,53 @@ set_single_density_disk:
     LD (HL),E
     INC HL
     LD (HL),D
-    ; Set disk_density_single in the disk param $10
-    LD DE,0x0005
-    ADD HL,DE
-    LD A, disk_density_single
-    LD (HL),A
-    ; Store the current disk density
-    LD (disk_density),A
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; FLOPPY DISK CONTROLLER ACCESS
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-fdc_init_drive:
-    POP DE ; DE is disk_active_track_drive_x
-    POP HL ; HL is disk_parameter_header
-    ; Why set track with the sector value????
-    IN A,(io_12_fdc_sector)
-    OUT (io_11_fdc_track),A
-    ; Update disk_active_track_drive_x
-    LD (DE),A
+finish_set_single_or_double_density_disk:
+    ; Copy 
+    LD HL, disk_active_info
+    LD DE, disk_active_info_drive_a
+    LD A, (disk_active_drive)
+    OR A
+    JR Z, skip_for_drive_a_bis
+    LD DE, disk_active_info_drive_b
+skip_for_drive_a_bis:
+    PUSH BC
+    LD BC, 0x3
+    LDIR
+    POP BC
+    POP DE
+    POP HL
     RET
 
 fdc_read_address:
-    ; FDC read address command
+    ; This is used to confirm that the disk is readable as configured
+    ; for single or double density. 
+    PUSH HL
+    PUSH BC
+    LD HL, disk_read_address_buffer
+    LD BC, disk_read_address_buffer_size*0x100 + io_13_fdc_data
     LD A, fdc_command_read_address
     OUT (io_10_fdc_command), A
+wait_for_data:
+    HALT
+    INI
+    JR NZ, wait_for_data
     CALL wait_for_result
     ; Is record not found?
     BIT fdc_status_record_not_found_bit, A
+    POP BC
+    POP HL
     RET
 
 fdc_seek_track_0:
     CALL prepare_drive
-    ; Restore controller
+    ; Go to the first side of the disk
+    IN A,(io_1c_system_bits)
+    AND ~system_bit_side_2_mask
+    OUT (io_1c_system_bits),A
+    ; Set active track to 0
+    XOR A
+    LD (disk_active_track), A
     LD A, fdc_command_restore
     OUT (io_10_fdc_command), A
     JR wait_for_result
@@ -997,8 +1082,25 @@ fdc_seek_track_0:
 fdc_seek_track:
     ; C: track number
     CALL prepare_drive
-    LD A,C
-    ; Request seek track C
+    LD A, (disk_active_has_sides)
+    OR A
+    JR Z, skip_disk_side_change
+    LD A , C
+    RRA
+    LD C, A
+    IN A,(io_1c_system_bits)
+    JR C, select_disk_side_2
+    ; Selet disk side 1
+    AND  ~system_bit_side_2_mask
+    JR update_disk_side
+select_disk_side_2:
+    ; Select disk side 2
+    OR system_bit_side_2_mask
+update_disk_side:
+    OUT (io_1c_system_bits),A
+skip_disk_side_change:
+    LD A, C
+    LD (disk_active_track), A
     OUT (io_13_fdc_data),A
     LD A, fdc_command_seek
     OUT (io_10_fdc_command),A
@@ -1006,7 +1108,12 @@ fdc_seek_track:
 
 fdc_set_sector:
     ; C = sector
+    IN A,(io_1c_system_bits)
+    BIT system_bit_side_2, A
     LD A,C
+    JR Z, skip_for_side_1
+    ADD A, tracks_per_side ; For tracks on the other side of the disk we add 10 
+skip_for_side_1:
     OUT (io_12_fdc_sector),A
     RET
 
@@ -1045,12 +1152,10 @@ prepare_drive:
     LD E,A
     IN A,(io_1c_system_bits)
     ; Clear drive select bits
-    AND ~ (system_bit_drive_a_mask|system_bit_drive_b_mask)
+    AND ~ (system_bit_double_density_neg_mask|system_bit_drive_a_mask|system_bit_drive_b_mask)
     ; Add the bit of the drive selected
     OR E
     INC A ; disk A(0) to mask 0x1, disk B(1) to mask 0x2
-    ; Clear the double density bit
-    AND ~system_bit_double_density_neg_mask
     ; Reflect the disk density variable on the system bits.
     LD HL, disk_density
     OR (HL)
@@ -1372,8 +1477,8 @@ init_ports_data:
     DB io_1d_system_bits_control, 0x03 ; Enable interrupts with AND
     DB io_1c_system_bits, 0x81 ;  system_bits = 0x81, drive A, ROM enabled
     DB io_1d_system_bits_control, 0xCF ; set mode 3-control
-    DB io_1d_system_bits_control, 0x0C ; direction = IIOO_OOOO
-
+    DB io_1d_system_bits_control, 0x08 ; direction = IOOO_OOOO
+    
     ; Parallel port, PIO-1A. See Z80-PIO Technical Manual
     DB io_09_parallel_control, 0x03 ; Enable interrupts with AND
     DB io_09_parallel_control, 0x0F ; set mode 0-output
@@ -1983,5 +2088,4 @@ console_write_string:
     JR console_write_string
 
 filler:
-    DB 0xff, 0x00
-
+    DS 0x76f, 0xff

@@ -67,6 +67,8 @@ If greek mode is set (with ESC-G), lowercase characters are shown as greek lette
 ```
 - 0x0000-0x07ff: ROM
 
+- 0xe400-0xfbff: Area to load OS from disk
+
 - 0xfa00-0xfa7f: First boot sector
 
 - 0xfc00-0xfc15: Work variables for the floopy R/W
