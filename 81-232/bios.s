@@ -453,7 +453,7 @@ read_another_boot_sector:
     CP C
     ; No, continue reading sector + 1
     JR NZ,read_another_boot_sector
-    ; Yes, track 0 completed. Continue with track 1, sector 10
+    ; Yes, track 0 completed. Continue with track 1, sector 16
     LD C,0x10                                    
     PUSH BC
     ; Move to track 1

@@ -1,0 +1,36 @@
+# File cambio.s
+0000			; CAMBIO.COM included on the kaypro CP/M 2.2 Spanish version 
+0000			 
+0000			WARM_START_VECTOR: EQU 0001h ; Address 0h has a JP WARM_START 
+0000			CONF_BYTE_OFFSET:  EQU 31h   ; The byte is a fixed offset from the warm start code 
+0000			 
+0000			CONFIG_BIT:        EQU 5 
+0000			 
+0000			BDOS_ENTRYPOINT:   EQU 0005h 
+0000			CALL_WRITESTR:     EQU 09h   ; BDOS call 
+0000			 
+0000			org	0100h 
+0100 2a 01 00			ld hl, (WARM_START_VECTOR) 
+0103 11 31 00			ld de, CONF_BYTE_OFFSET 
+0106 19				add hl, de 
+0107 cb 6e			bit CONFIG_BIT, (hl) 
+0109 28 07			jr z, set_bit 
+010b			clear_bit: 
+010b cb ae			res CONFIG_BIT, (hl) 
+010d 11 1d 01			ld de, clear_message 
+0110 18 05			jr display_message 
+0112			set_bit: 
+0112 cb ee			set CONFIG_BIT, (hl) 
+0114 11 50 01			ld de, set_message 
+0117			display_message: 
+0117 0e 09			ld c, CALL_WRITESTR 
+0119 cd 05 00			call BDOS_ENTRYPOINT 
+011c c9				ret  
+011d			clear_message: 
+011d .. c0 ..			db "\r\nCambiando a caracteres espa",0c0h,"oles (EUR/USASCII)\r\n$" 
+0150			set_message: 
+0150 ..				db "\r\nCambiando a caracteres europeos (E-ASCII)\r\n$" 
+017e			filler: 
+017e 00 00			db 0, 0 
+# End of file cambio.s
+0180
