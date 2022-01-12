@@ -1,0 +1,360 @@
+# File bios_us.s
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; CONSTANTS 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			 
+0000			io_00_serial_baud_rate:     EQU 0x00 
+0000			io_1c_system_bits:          EQU 0x1c 
+0000			system_bit_motors_neg:        EQU 6 
+0000			system_bit_bank:              EQU 7 
+0000			 
+0000			 
+0000			reset:                      EQU 0x0000 
+0000			iobyte:                     EQU 0x0003 
+0000			user_drive:                 EQU 0x0004 
+0000			bdos_ep:                    EQU 0x0005 
+0000			bdos_boot:                  EQU 0xe400 
+0000			bdos_entrypoint:            EQU 0xec06 
+0000			rom_stack:                  EQU 0xfc00 
+0000			disk_DMA_address:           EQU 0xfc14 ; 2 bytes 
+0000			ram_e407:                   EQU 0xe407 
+0000			 
+0000			; See CP/M 2.2 System alteration guide appendix G 
+0000			rw_type_directory_write:    EQU 1 
+0000			 
+0000			ROM_INITDSK:   EQU 0x03 
+0000			ROM_HOME:      EQU 0x0c 
+0000			ROM_SELDSK:    EQU 0x0f 
+0000			ROM_SETTRK:    EQU 0x12 
+0000			ROM_SETSEC:    EQU 0x15 
+0000			ROM_SETDMA:    EQU 0x18 
+0000			ROM_READ:      EQU 0x1b 
+0000			ROM_WRITE:     EQU 0x1e 
+0000			ROM_SECTRAN:   EQU 0x21 
+0000			ROM_KBDSTAT:   EQU 0x2a 
+0000			ROM_KBDIN:     EQU 0x2d 
+0000			ROM_SIOSTI:    EQU 0x33 
+0000			ROM_SIOIN:     EQU 0x36 
+0000			ROM_SIOOUT:    EQU 0x39 
+0000			ROM_LISTST:    EQU 0x3c 
+0000			ROM_LIST:      EQU 0x3f 
+0000			ROM_SERSTO:    EQU 0x42 
+0000			ROM_VIDOUT:    EQU 0x45 
+0000			 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; BIOS ENTRY POINTS 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			 
+0000			ORG 0fa00h 
+fa00 c3 48 fa		    JP BOOT 
+fa03			EP_WBOOT: 
+fa03 c3 99 fa		    JP WBOOT 
+fa06 c3 f3 fa		    JP CONST 
+fa09 c3 09 fb		    JP CONIN 
+fa0c c3 2f fb		    JP CONOUT 
+fa0f c3 48 fb		    JP LIST 
+fa12 c3 43 fb		    JP PUNCH 
+fa15 c3 3e fb		    JP READER 
+fa18 c3 7c fb		    JP HOME 
+fa1b c3 80 fb		    JP SELDSK 
+fa1e c3 84 fb		    JP SETTRK 
+fa21 c3 88 fb		    JP SETSEC 
+fa24 c3 8c fb		    JP SETDMA 
+fa27 c3 90 fb		    JP READ 
+fa2a c3 98 fb		    JP WRITE 
+fa2d c3 65 fb		    JP LISTST 
+fa30 c3 a8 fb		    JP SECTRAN 
+fa33			 
+fa33			iobyte_default: 
+fa33 81			    DB 81h ; Console to CRT and List to parallel port 
+fa34			bios_config: 
+fa34 00			    DB 00h 
+fa35			control_char_conversion: 
+fa35 0b 0a 08 0c	    DB 0Bh, 0Ah, 08h, 0Ch 
+fa39 ..			    DB "0123" 
+fa3d ..			    DB "4567" 
+fa41 ..			    DB "89-," 
+fa45 ..			    DB "\r." 
+fa47			baud_rate_default: 
+fa47 05			    DB 05h 
+fa48			 
+fa48			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+fa48			; BOOT 
+fa48			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+fa48			 
+fa48			 
+fa48			BOOT: 
+fa48 cd 78 fb		    CALL INITDSK 
+fa4b			    ; User 0, drive 0 
+fa4b af			    XOR A 
+fa4c 32 04 00		    LD (user_drive), A 
+fa4f			    ; Reset iobyte 
+fa4f 3a 33 fa		    LD A, (iobyte_default) 
+fa52 32 03 00		    LD (iobyte), A 
+fa55			    ; Reset serial baur rate 
+fa55 3a 47 fa		    LD A, (baud_rate_default) 
+fa58 d3 00		    OUT (io_00_serial_baud_rate), A 
+fa5a cd cf fb		    CALL WRITE_STRING_INLINE 
+fa5d 1a .. 00		    DB 1Ah,"\r\nKAYPRO II 64k CP/M vers 2.2\r\n",0 
+fa7e			BOOT_SILENT: 
+fa7e 3e c3		    LD A,0xc3 ; JP opcode 
+fa80			    ; Set the WBOOT jump at address 0 
+fa80 21 03 fa		    LD HL, EP_WBOOT 
+fa83 32 00 00		    LD (reset), A 
+fa86 22 01 00		    LD (reset+1), HL 
+fa89			    ; Set BDOS entry point at address 5 
+fa89 21 06 ec		    LD HL, bdos_entrypoint 
+fa8c 32 05 00		    LD (bdos_ep), A 
+fa8f 22 06 00		    LD (bdos_ep+1), HL 
+fa92			    ; Continue boot to CCP 
+fa92 3a 04 00		    LD A, (user_drive) 
+fa95 4f			    LD C, A 
+fa96 c3 00 e4		    JP bdos_boot 
+fa99			 
+fa99			WBOOT: 
+fa99 cd 78 fb		    CALL INITDSK 
+fa9c cd cf fb		    CALL WRITE_STRING_INLINE 
+fa9f .. 00		    DB "\r\nWarm Boot\r\n",0 
+faad			 
+faad			WBOOT_SILENT: 
+faad			    ; Rest the stack 
+faad 31 00 01		    LD SP,0x100 
+fab0			    ; Select drive 0, track 0 
+fab0 0e 00		    LD C,0x0 
+fab2 cd 80 fb		    CALL SELDSK 
+fab5 01 00 00		    LD BC,0x0 
+fab8 cd 84 fb		    CALL SETTRK 
+fabb			    ; Reset default dma address 
+fabb 21 00 e4		    LD HL,bdos_boot 
+fabe 22 14 fc		    LD (disk_DMA_address),HL 
+fac1 01 01 2c		    LD BC,0x2c01 
+fac4			WBOOT_LOOP: 
+fac4 c5			    PUSH BC 
+fac5 cd 88 fb		    CALL SETSEC 
+fac8 cd 90 fb		    CALL READ 
+facb c1			    POP BC 
+facc b7			    OR A 
+facd 20 de		    JR NZ,WBOOT_SILENT 
+facf 2a 14 fc		    LD HL,(disk_DMA_address) 
+fad2 11 80 00		    LD DE,0x80 
+fad5 19			    ADD HL,DE 
+fad6 22 14 fc		    LD (disk_DMA_address),HL 
+fad9 af			    XOR A 
+fada 32 07 e4		    LD (ram_e407),A 
+fadd 05			    DEC B 
+fade ca 7e fa		    JP Z,BOOT_SILENT 
+fae1 0c			    INC C 
+fae2 3e 28		    LD A,0x28 
+fae4 b9			    CP C 
+fae5 c2 c4 fa		    JP NZ,WBOOT_LOOP 
+fae8 0e 10		    LD C,0x10 
+faea c5			    PUSH BC 
+faeb 0e 01		    LD C,0x1 
+faed cd 84 fb		    CALL SETTRK 
+faf0 c1			    POP BC 
+faf1 18 d1		    JR WBOOT_LOOP 
+faf3			 
+faf3			CONST: 
+faf3			    ; Make sure the disk is off once every 256 calls 
+faf3 21 db fb		    LD HL,CONST_COUNTER 
+faf6 34			    INC (HL) 
+faf7 cc 28 fb		    CALL Z,DISKOFF 
+fafa			    ; 
+fafa 3a 03 00		    LD A,(iobyte) 
+fafd e6 03		    AND 0x3 
+faff 2e 33		    LD L,ROM_SIOSTI 
+fb01 ca ac fb		    JP Z,ROM_JUMP 
+fb04 2e 2a		    LD L,ROM_KBDSTAT 
+fb06 c3 ac fb		    JP ROM_JUMP 
+fb09			 
+fb09			CONIN: 
+fb09 cd 28 fb		    CALL DISKOFF 
+fb0c 3a 03 00		    LD A,(iobyte) 
+fb0f e6 03		    AND 0x3 
+fb11 2e 36		    LD L,ROM_SIOIN 
+fb13 ca ac fb		    JP Z,ROM_JUMP 
+fb16 2e 2d		    LD L,ROM_KBDIN 
+fb18 cd ac fb		    CALL ROM_JUMP 
+fb1b b7			    OR A 
+fb1c f0			    RET P 
+fb1d e6 1f		    AND 0x1f ; control char conversion table is smaller than 32!! 
+fb1f 21 35 fa		    LD HL, control_char_conversion 
+fb22 4f			    LD C,A 
+fb23 06 00		    LD B,0x0 
+fb25 09			    ADD HL,BC 
+fb26 7e			    LD A,(HL) 
+fb27 c9			    RET 
+fb28			 
+fb28			DISKOFF: 
+fb28 db 1c		    IN A, (io_1c_system_bits) 
+fb2a cb f7		    SET system_bit_motors_neg, A 
+fb2c d3 1c		    OUT (io_1c_system_bits), A 
+fb2e c9			    RET 
+fb2f			 
+fb2f			CONOUT: 
+fb2f 3a 03 00		    LD A,(iobyte) 
+fb32 e6 03		    AND 0x3 
+fb34 2e 39		    LD L,ROM_SIOOUT 
+fb36 ca ac fb		    JP Z,ROM_JUMP 
+fb39 2e 45		    LD L,ROM_VIDOUT 
+fb3b c3 ac fb		    JP ROM_JUMP 
+fb3e			 
+fb3e			READER: 
+fb3e 2e 36		    LD L,ROM_SIOIN 
+fb40 c3 ac fb		    JP ROM_JUMP 
+fb43			 
+fb43			PUNCH: 
+fb43 2e 39		    LD L,ROM_SIOOUT 
+fb45 c3 ac fb		    JP ROM_JUMP 
+fb48			 
+fb48			LIST: 
+fb48 3a 03 00		    LD A,(iobyte) 
+fb4b e6 c0		    AND 0xc0 
+fb4d 2e 39		    LD L,ROM_SIOOUT 
+fb4f ca ac fb		    JP Z,ROM_JUMP 
+fb52 2e 3f		    LD L,ROM_LIST 
+fb54 fe 80		    CP 0x80 
+fb56 ca ac fb		    JP Z,ROM_JUMP 
+fb59 2e 45		    LD L,ROM_VIDOUT 
+fb5b fe 40		    CP 0x40 
+fb5d ca ac fb		    JP Z,ROM_JUMP 
+fb60 2e 39		    LD L,ROM_SIOOUT 
+fb62 c3 ac fb		    JP ROM_JUMP 
+fb65			 
+fb65			LISTST: 
+fb65 3a 03 00		    LD A,(iobyte) 
+fb68 e6 c0		    AND 0xc0 
+fb6a 2e 42		    LD L,ROM_SERSTO 
+fb6c ca ac fb		    JP Z,ROM_JUMP 
+fb6f 2e 3c		    LD L,ROM_LISTST 
+fb71 fe 80		    CP 0x80 
+fb73 ca ac fb		    JP Z,ROM_JUMP 
+fb76 af			    XOR A 
+fb77 c9			    RET 
+fb78			 
+fb78			INITDSK: 
+fb78 2e 03		    LD L,ROM_INITDSK 
+fb7a 18 30		    JR ROM_JUMP 
+fb7c			 
+fb7c			HOME: 
+fb7c 2e 0c		    LD L,ROM_HOME 
+fb7e 18 2c		    JR ROM_JUMP 
+fb80			 
+fb80			SELDSK: 
+fb80 2e 0f		    LD L,ROM_SELDSK 
+fb82 18 28		    JR ROM_JUMP 
+fb84			 
+fb84			SETTRK: 
+fb84 2e 12		    LD L,ROM_SETTRK 
+fb86 18 24		    JR ROM_JUMP 
+fb88			 
+fb88			SETSEC: 
+fb88 2e 15		    LD L,ROM_SETSEC 
+fb8a 18 20		    JR ROM_JUMP 
+fb8c			 
+fb8c			SETDMA: 
+fb8c 2e 18		    LD L,ROM_SETDMA 
+fb8e 18 1c		    JR ROM_JUMP 
+fb90			 
+fb90			READ: 
+fb90			    ; Reset the CONST counter 
+fb90 af			    XOR A 
+fb91 32 db fb		    LD (CONST_COUNTER), A 
+fb94			    ; Read 
+fb94 2e 1b		    LD L,ROM_READ 
+fb96 18 14		    JR ROM_JUMP 
+fb98			 
+fb98			WRITE: 
+fb98			    ; Reset the CONST counter 
+fb98 af			    XOR A 
+fb99 32 db fb		    LD (CONST_COUNTER), A 
+fb9c			    ; Write 
+fb9c 2e 1e		    LD L,ROM_WRITE 
+fb9e			    ; Is the bios_config 0? 
+fb9e 3a 34 fa		    LD A,(bios_config) 
+fba1 b7			    OR A 
+fba2			    ; Yes, write normally 
+fba2 28 08		    JR Z,ROM_JUMP 
+fba4			    ; No, force the write type 
+fba4 0e 01		    LD C,rw_type_directory_write 
+fba6 18 04		    JR ROM_JUMP 
+fba8			 
+fba8			SECTRAN: 
+fba8 2e 21		    LD L,ROM_SECTRAN 
+fbaa 18 00		    JR ROM_JUMP 
+fbac			 
+fbac			ROM_JUMP: 
+fbac d9			    EXX 
+fbad			    ; Activate the ROM bank 
+fbad db 1c		    IN A, (io_1c_system_bits) 
+fbaf cb ff		    SET system_bit_bank, A 
+fbb1 d3 1c		    OUT (io_1c_system_bits), A 
+fbb3			    ; Switch to the ROM stack 
+fbb3 ed 73 dc fb	    LD (STACK_SAVE), SP 
+fbb7 31 00 fc		    LD SP, rom_stack 
+fbba			    ; Push the ROM cleanup code to RET there 
+fbba 11 c2 fb		    LD DE, ROM_JUMP_CLEANUP 
+fbbd d5			    PUSH DE 
+fbbe d9			    EXX 
+fbbf			    ; Jump to the ROM address in L, page 0 
+fbbf 26 00		    LD H,0x0 
+fbc1 e9			    JP (HL) 
+fbc2			 
+fbc2			ROM_JUMP_CLEANUP: 
+fbc2 08			    EX AF, AF' ;' 
+fbc3			    ; Restore the stack 
+fbc3 ed 7b dc fb	    LD SP, (STACK_SAVE) 
+fbc7			    ; Deactivate the ROM bank 
+fbc7 db 1c		    IN A, (io_1c_system_bits) 
+fbc9 cb bf		    RES system_bit_bank, A 
+fbcb d3 1c		    OUT (io_1c_system_bits), A 
+fbcd 08			    EX AF, AF' ; ' 
+fbce			    ; Return to the caller 
+fbce c9			    RET 
+fbcf			 
+fbcf			WRITE_STRING_INLINE: 
+fbcf			    ; Retrieve the char at the return address 
+fbcf e3			    EX (SP), HL 
+fbd0 7e			    LD A, (HL) 
+fbd1			    ; Increase the return address 
+fbd1 23			    INC HL 
+fbd2 e3			    EX (SP), HL 
+fbd3			    ; Is the char a null? 
+fbd3 b7			    OR A 
+fbd4			    ; Yes, return 
+fbd4 c8			    RET Z 
+fbd5			    ; No, write it 
+fbd5 4f			    LD C, A 
+fbd6 cd 2f fb		    CALL CONOUT 
+fbd9			    ; Process the next char 
+fbd9 18 f4		    JR WRITE_STRING_INLINE 
+fbdb			 
+fbdb			CONST_COUNTER: 
+fbdb 04			    DB $04 
+fbdc			STACK_SAVE: 
+fbdc 35 ef		    DW $EF35 
+fbde			FILLER: 
+fbde 0x00...		    DS 14, $00 
+fbec 8e			    DB $8E 
+fbed 04			    DB $04 
+fbee 8e			    DB $8E 
+fbef 04			    DB $04 
+fbf0 03			    DB $03 
+fbf1 04			    DB $04 
+fbf2 88			    DB $88 
+fbf3 9c			    DB $9C 
+fbf4 c5			    DB $C5 
+fbf5 04			    DB $04 
+fbf6 53			    DB $53 
+fbf7 ff			    DB $FF 
+fbf8 14			    DB $14 
+fbf9 05			    DB $05 
+fbfa 0f			    DB $0F 
+fbfb 04			    DB $04 
+fbfc 13			    DB $13 
+fbfd 06			    DB $06 
+fbfe c2 fb		    DW ROM_JUMP_CLEANUP 
+fc00			 
+# End of file bios_us.s
+fc00
