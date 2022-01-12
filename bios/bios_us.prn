@@ -11,14 +11,20 @@
 0000			 
 0000			reset:                      EQU 0x0000 
 0000			iobyte:                     EQU 0x0003 
+0000			iobyte_console_mask:          EQU 0x03 
+0000			iobyte_list_mask:             EQU 0xc0 
+0000			iobyte_list_CRT:              EQU 0x40 
+0000			iobyte_list_PRT:              EQU 0x80 
 0000			user_drive:                 EQU 0x0004 
 0000			bdos_ep:                    EQU 0x0005 
-0000			bdos_boot:                  EQU 0xe400 
+0000			ccp:                        EQU 0xe400 
 0000			bdos_entrypoint:            EQU 0xec06 
 0000			rom_stack:                  EQU 0xfc00 
 0000			disk_DMA_address:           EQU 0xfc14 ; 2 bytes 
 0000			ram_e407:                   EQU 0xe407 
 0000			 
+0000			sector_size:                EQU 128 
+0000			sectors_per_track:          EQU 40 
 0000			; See CP/M 2.2 System alteration guide appendix G 
 0000			rw_type_directory_write:    EQU 1 
 0000			 
@@ -92,7 +98,7 @@ fa4c 32 04 00		    LD (user_drive), A
 fa4f			    ; Reset iobyte 
 fa4f 3a 33 fa		    LD A, (iobyte_default) 
 fa52 32 03 00		    LD (iobyte), A 
-fa55			    ; Reset serial baur rate 
+fa55			    ; Reset serial baud rate 
 fa55 3a 47 fa		    LD A, (baud_rate_default) 
 fa58 d3 00		    OUT (io_00_serial_baud_rate), A 
 fa5a cd cf fb		    CALL WRITE_STRING_INLINE 
@@ -110,7 +116,7 @@ fa8f 22 06 00		    LD (bdos_ep+1), HL
 fa92			    ; Continue boot to CCP 
 fa92 3a 04 00		    LD A, (user_drive) 
 fa95 4f			    LD C, A 
-fa96 c3 00 e4		    JP bdos_boot 
+fa96 c3 00 e4		    JP ccp 
 fa99			 
 fa99			WBOOT: 
 fa99 cd 78 fb		    CALL INITDSK 
@@ -118,72 +124,91 @@ fa9c cd cf fb		    CALL WRITE_STRING_INLINE
 fa9f .. 00		    DB "\r\nWarm Boot\r\n",0 
 faad			 
 faad			WBOOT_SILENT: 
-faad			    ; Rest the stack 
-faad 31 00 01		    LD SP,0x100 
+faad			    ; Reset the stack 
+faad 31 00 01		    LD SP, 0x100 
 fab0			    ; Select drive 0, track 0 
-fab0 0e 00		    LD C,0x0 
+fab0 0e 00		    LD C, 0x0 
 fab2 cd 80 fb		    CALL SELDSK 
-fab5 01 00 00		    LD BC,0x0 
+fab5 01 00 00		    LD BC, 0x0 
 fab8 cd 84 fb		    CALL SETTRK 
-fabb			    ; Reset default dma address 
-fabb 21 00 e4		    LD HL,bdos_boot 
-fabe 22 14 fc		    LD (disk_DMA_address),HL 
-fac1 01 01 2c		    LD BC,0x2c01 
+fabb			    ; Set DMA address to where CCP is 
+fabb 21 00 e4		    LD HL, ccp 
+fabe 22 14 fc		    LD (disk_DMA_address), HL 
+fac1			    ; Read 44 sectors, start on sector 1 
+fac1 01 01 2c		    LD BC, 0x2c01 
 fac4			WBOOT_LOOP: 
 fac4 c5			    PUSH BC 
 fac5 cd 88 fb		    CALL SETSEC 
 fac8 cd 90 fb		    CALL READ 
 facb c1			    POP BC 
+facc			    ; Read error? 
 facc b7			    OR A 
-facd 20 de		    JR NZ,WBOOT_SILENT 
-facf 2a 14 fc		    LD HL,(disk_DMA_address) 
-fad2 11 80 00		    LD DE,0x80 
-fad5 19			    ADD HL,DE 
-fad6 22 14 fc		    LD (disk_DMA_address),HL 
+facd			    ; Yes, restart at track 0, sector 1 
+facd 20 de		    JR NZ, WBOOT_SILENT 
+facf			    ; No, increase DMA by 128 bytes for the next sector 
+facf 2a 14 fc		    LD HL, (disk_DMA_address) 
+fad2 11 80 00		    LD DE, sector_size 
+fad5 19			    ADD HL, DE 
+fad6 22 14 fc		    LD (disk_DMA_address), HL 
+fad9			    ; Store 0 in e407. Why? 
 fad9 af			    XOR A 
-fada 32 07 e4		    LD (ram_e407),A 
+fada 32 07 e4		    LD (ram_e407), A 
+fadd			    ; Are we done? 
 fadd 05			    DEC B 
-fade ca 7e fa		    JP Z,BOOT_SILENT 
+fade			    ; Yes, exec CCP 
+fade ca 7e fa		    JP Z, BOOT_SILENT 
+fae1			    ; No, next sector 
 fae1 0c			    INC C 
-fae2 3e 28		    LD A,0x28 
+fae2			    ; Are we past the last sector of track 0 
+fae2 3e 28		    LD A, sectors_per_track 
 fae4 b9			    CP C 
+fae5			    ; No, read the next sector 
 fae5 c2 c4 fa		    JP NZ,WBOOT_LOOP 
+fae8			    ; Yes, go to track 1, sector 16 
 fae8 0e 10		    LD C,0x10 
 faea c5			    PUSH BC 
 faeb 0e 01		    LD C,0x1 
 faed cd 84 fb		    CALL SETTRK 
 faf0 c1			    POP BC 
+faf1			    ; Read the next sector 
 faf1 18 d1		    JR WBOOT_LOOP 
 faf3			 
 faf3			CONST: 
 faf3			    ; Make sure the disk is off once every 256 calls 
-faf3 21 db fb		    LD HL,CONST_COUNTER 
+faf3 21 db fb		    LD HL, CONST_COUNTER 
 faf6 34			    INC (HL) 
-faf7 cc 28 fb		    CALL Z,DISKOFF 
-fafa			    ; 
-fafa 3a 03 00		    LD A,(iobyte) 
-fafd e6 03		    AND 0x3 
-faff 2e 33		    LD L,ROM_SIOSTI 
-fb01 ca ac fb		    JP Z,ROM_JUMP 
-fb04 2e 2a		    LD L,ROM_KBDSTAT 
+faf7 cc 28 fb		    CALL Z, DISKOFF 
+fafa			    ; What is the console assigned device? 
+fafa 3a 03 00		    LD A, (iobyte) 
+fafd e6 03		    AND iobyte_console_mask 
+faff 2e 33		    LD L, ROM_SIOSTI 
+fb01			    ; It's the serial port, query the serial port 
+fb01 ca ac fb		    JP Z, ROM_JUMP 
+fb04			    ; It's the CRT, query the keyboard 
+fb04 2e 2a		    LD L, ROM_KBDSTAT 
 fb06 c3 ac fb		    JP ROM_JUMP 
 fb09			 
 fb09			CONIN: 
 fb09 cd 28 fb		    CALL DISKOFF 
-fb0c 3a 03 00		    LD A,(iobyte) 
-fb0f e6 03		    AND 0x3 
-fb11 2e 36		    LD L,ROM_SIOIN 
-fb13 ca ac fb		    JP Z,ROM_JUMP 
-fb16 2e 2d		    LD L,ROM_KBDIN 
+fb0c			    ; What is the console assigned device? 
+fb0c 3a 03 00		    LD A, (iobyte) 
+fb0f e6 03		    AND iobyte_console_mask 
+fb11 2e 36		    LD L, ROM_SIOIN 
+fb13			    ; It's the TTY, query the serial port 
+fb13 ca ac fb		    JP Z, ROM_JUMP 
+fb16			    ; It's the CRT, query the keyboard 
+fb16 2e 2d		    LD L, ROM_KBDIN 
 fb18 cd ac fb		    CALL ROM_JUMP 
+fb1b			    ; Process the keyboard output 
 fb1b b7			    OR A 
-fb1c f0			    RET P 
+fb1c f0			    RET P ;?? 
 fb1d e6 1f		    AND 0x1f ; control char conversion table is smaller than 32!! 
+fb1f			    ; Translate the control chars 
 fb1f 21 35 fa		    LD HL, control_char_conversion 
-fb22 4f			    LD C,A 
-fb23 06 00		    LD B,0x0 
-fb25 09			    ADD HL,BC 
-fb26 7e			    LD A,(HL) 
+fb22 4f			    LD C, A 
+fb23 06 00		    LD B, 0x0 
+fb25 09			    ADD HL, BC 
+fb26 7e			    LD A, (HL) 
 fb27 c9			    RET 
 fb28			 
 fb28			DISKOFF: 
@@ -193,68 +218,82 @@ fb2c d3 1c		    OUT (io_1c_system_bits), A
 fb2e c9			    RET 
 fb2f			 
 fb2f			CONOUT: 
-fb2f 3a 03 00		    LD A,(iobyte) 
-fb32 e6 03		    AND 0x3 
-fb34 2e 39		    LD L,ROM_SIOOUT 
-fb36 ca ac fb		    JP Z,ROM_JUMP 
-fb39 2e 45		    LD L,ROM_VIDOUT 
+fb2f			    ; What is the console assigned device? 
+fb2f 3a 03 00		    LD A, (iobyte) 
+fb32 e6 03		    AND iobyte_console_mask 
+fb34 2e 39		    LD L, ROM_SIOOUT 
+fb36			    ; It's the TTY, write to the serial port 
+fb36 ca ac fb		    JP Z, ROM_JUMP 
+fb39			    ; It's the CRT, write to video memory 
+fb39 2e 45		    LD L, ROM_VIDOUT 
 fb3b c3 ac fb		    JP ROM_JUMP 
 fb3e			 
 fb3e			READER: 
-fb3e 2e 36		    LD L,ROM_SIOIN 
+fb3e			    ; Only the TTY is supported 
+fb3e 2e 36		    LD L, ROM_SIOIN 
 fb40 c3 ac fb		    JP ROM_JUMP 
 fb43			 
 fb43			PUNCH: 
-fb43 2e 39		    LD L,ROM_SIOOUT 
+fb43			    ; Only the TTY is supported 
+fb43 2e 39		    LD L, ROM_SIOOUT 
 fb45 c3 ac fb		    JP ROM_JUMP 
 fb48			 
 fb48			LIST: 
+fb48			    ; What is the list assigned device? 
 fb48 3a 03 00		    LD A,(iobyte) 
-fb4b e6 c0		    AND 0xc0 
-fb4d 2e 39		    LD L,ROM_SIOOUT 
-fb4f ca ac fb		    JP Z,ROM_JUMP 
-fb52 2e 3f		    LD L,ROM_LIST 
-fb54 fe 80		    CP 0x80 
-fb56 ca ac fb		    JP Z,ROM_JUMP 
-fb59 2e 45		    LD L,ROM_VIDOUT 
-fb5b fe 40		    CP 0x40 
-fb5d ca ac fb		    JP Z,ROM_JUMP 
-fb60 2e 39		    LD L,ROM_SIOOUT 
+fb4b e6 c0		    AND iobyte_list_mask 
+fb4d			    ; It's the TTY, write to the serial port 
+fb4d 2e 39		    LD L, ROM_SIOOUT 
+fb4f ca ac fb		    JP Z, ROM_JUMP 
+fb52 2e 3f		    LD L, ROM_LIST 
+fb54 fe 80		    CP iobyte_list_PRT 
+fb56			    ; It's the PRT, write to the parallel port 
+fb56 ca ac fb		    JP Z, ROM_JUMP 
+fb59 2e 45		    LD L, ROM_VIDOUT 
+fb5b fe 40		    CP iobyte_list_CRT 
+fb5d			    ; It's the CRT, write to video memory 
+fb5d ca ac fb		    JP Z, ROM_JUMP 
+fb60 2e 39		    LD L, ROM_SIOOUT 
+fb62			    ; It's the UL1, write to the serial port 
 fb62 c3 ac fb		    JP ROM_JUMP 
 fb65			 
 fb65			LISTST: 
+fb65			    ; What is the list assigned device? 
 fb65 3a 03 00		    LD A,(iobyte) 
-fb68 e6 c0		    AND 0xc0 
-fb6a 2e 42		    LD L,ROM_SERSTO 
-fb6c ca ac fb		    JP Z,ROM_JUMP 
-fb6f 2e 3c		    LD L,ROM_LISTST 
-fb71 fe 80		    CP 0x80 
-fb73 ca ac fb		    JP Z,ROM_JUMP 
+fb68 e6 c0		    AND iobyte_list_mask 
+fb6a			    ; It's the TTY, query the serial port 
+fb6a 2e 42		    LD L, ROM_SERSTO 
+fb6c ca ac fb		    JP Z, ROM_JUMP 
+fb6f 2e 3c		    LD L, ROM_LISTST 
+fb71 fe 80		    CP iobyte_list_PRT 
+fb73			    ; It's the PRT, write to the parallel port 
+fb73 ca ac fb		    JP Z, ROM_JUMP 
+fb76			    ; It's the CRT or UL1, return always 0 
 fb76 af			    XOR A 
 fb77 c9			    RET 
 fb78			 
 fb78			INITDSK: 
-fb78 2e 03		    LD L,ROM_INITDSK 
+fb78 2e 03		    LD L, ROM_INITDSK 
 fb7a 18 30		    JR ROM_JUMP 
 fb7c			 
 fb7c			HOME: 
-fb7c 2e 0c		    LD L,ROM_HOME 
+fb7c 2e 0c		    LD L, ROM_HOME 
 fb7e 18 2c		    JR ROM_JUMP 
 fb80			 
 fb80			SELDSK: 
-fb80 2e 0f		    LD L,ROM_SELDSK 
+fb80 2e 0f		    LD L, ROM_SELDSK 
 fb82 18 28		    JR ROM_JUMP 
 fb84			 
 fb84			SETTRK: 
-fb84 2e 12		    LD L,ROM_SETTRK 
+fb84 2e 12		    LD L, ROM_SETTRK 
 fb86 18 24		    JR ROM_JUMP 
 fb88			 
 fb88			SETSEC: 
-fb88 2e 15		    LD L,ROM_SETSEC 
+fb88 2e 15		    LD L, ROM_SETSEC 
 fb8a 18 20		    JR ROM_JUMP 
 fb8c			 
 fb8c			SETDMA: 
-fb8c 2e 18		    LD L,ROM_SETDMA 
+fb8c 2e 18		    LD L, ROM_SETDMA 
 fb8e 18 1c		    JR ROM_JUMP 
 fb90			 
 fb90			READ: 
@@ -262,7 +301,7 @@ fb90			    ; Reset the CONST counter
 fb90 af			    XOR A 
 fb91 32 db fb		    LD (CONST_COUNTER), A 
 fb94			    ; Read 
-fb94 2e 1b		    LD L,ROM_READ 
+fb94 2e 1b		    LD L, ROM_READ 
 fb96 18 14		    JR ROM_JUMP 
 fb98			 
 fb98			WRITE: 
@@ -275,13 +314,13 @@ fb9e			    ; Is the bios_config 0?
 fb9e 3a 34 fa		    LD A,(bios_config) 
 fba1 b7			    OR A 
 fba2			    ; Yes, write normally 
-fba2 28 08		    JR Z,ROM_JUMP 
+fba2 28 08		    JR Z, ROM_JUMP 
 fba4			    ; No, force the write type 
-fba4 0e 01		    LD C,rw_type_directory_write 
+fba4 0e 01		    LD C, rw_type_directory_write 
 fba6 18 04		    JR ROM_JUMP 
 fba8			 
 fba8			SECTRAN: 
-fba8 2e 21		    LD L,ROM_SECTRAN 
+fba8 2e 21		    LD L, ROM_SECTRAN 
 fbaa 18 00		    JR ROM_JUMP 
 fbac			 
 fbac			ROM_JUMP: 
@@ -336,25 +375,12 @@ fbdc			STACK_SAVE:
 fbdc 35 ef		    DW $EF35 
 fbde			FILLER: 
 fbde 0x00...		    DS 14, $00 
-fbec 8e			    DB $8E 
-fbed 04			    DB $04 
-fbee 8e			    DB $8E 
-fbef 04			    DB $04 
-fbf0 03			    DB $03 
-fbf1 04			    DB $04 
-fbf2 88			    DB $88 
-fbf3 9c			    DB $9C 
-fbf4 c5			    DB $C5 
-fbf5 04			    DB $04 
-fbf6 53			    DB $53 
-fbf7 ff			    DB $FF 
-fbf8 14			    DB $14 
-fbf9 05			    DB $05 
-fbfa 0f			    DB $0F 
-fbfb 04			    DB $04 
-fbfc 13			    DB $13 
-fbfd 06			    DB $06 
-fbfe c2 fb		    DW ROM_JUMP_CLEANUP 
+fbec 8e 04 8e 04	    DB $8E, $04, $8E, $04 
+fbf0 03 04 88 9c	    DB $03, $04, $88, $9C 
+fbf4 c5 04 53 ff	    DB $C5, $04, $53, $FF 
+fbf8 14 05 0f 04	    DB $14, $05, $0F, $04 
+fbfc 13 06		    DB $13, $06 
+fbfe c2 fb		    DW ROM_JUMP_CLEANUP ; not used 
 fc00			 
 # End of file bios_us.s
 fc00

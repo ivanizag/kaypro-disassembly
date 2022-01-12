@@ -10,14 +10,20 @@ system_bit_bank:              EQU 7
 
 reset:                      EQU 0x0000
 iobyte:                     EQU 0x0003
+iobyte_console_mask:          EQU 0x03
+iobyte_list_mask:             EQU 0xc0
+iobyte_list_CRT:              EQU 0x40
+iobyte_list_PRT:              EQU 0x80
 user_drive:                 EQU 0x0004
 bdos_ep:                    EQU 0x0005
-bdos_boot:                  EQU 0xe400
+ccp:                        EQU 0xe400
 bdos_entrypoint:            EQU 0xec06
 rom_stack:                  EQU 0xfc00
 disk_DMA_address:           EQU 0xfc14 ; 2 bytes
 ram_e407:                   EQU 0xe407
 
+sector_size:                EQU 128
+sectors_per_track:          EQU 40
 ; See CP/M 2.2 System alteration guide appendix G
 rw_type_directory_write:    EQU 1
 
@@ -91,7 +97,7 @@ BOOT:
     ; Reset iobyte
     LD A, (iobyte_default)
     LD (iobyte), A
-    ; Reset serial baur rate
+    ; Reset serial baud rate
     LD A, (baud_rate_default)
     OUT (io_00_serial_baud_rate), A
     CALL WRITE_STRING_INLINE
@@ -109,7 +115,7 @@ BOOT_SILENT:
     ; Continue boot to CCP
     LD A, (user_drive)
     LD C, A
-    JP bdos_boot
+    JP ccp
 
 WBOOT:
     CALL INITDSK
@@ -117,72 +123,91 @@ WBOOT:
     DB "\r\nWarm Boot\r\n",0
 
 WBOOT_SILENT:
-    ; Rest the stack
-    LD SP,0x100
+    ; Reset the stack
+    LD SP, 0x100
     ; Select drive 0, track 0
-    LD C,0x0
+    LD C, 0x0
     CALL SELDSK
-    LD BC,0x0
+    LD BC, 0x0
     CALL SETTRK
-    ; Reset default dma address
-    LD HL,bdos_boot
-    LD (disk_DMA_address),HL
-    LD BC,0x2c01
+    ; Set DMA address to where CCP is
+    LD HL, ccp
+    LD (disk_DMA_address), HL
+    ; Read 44 sectors, start on sector 1
+    LD BC, 0x2c01
 WBOOT_LOOP:
     PUSH BC
     CALL SETSEC
     CALL READ
     POP BC
+    ; Read error?
     OR A
-    JR NZ,WBOOT_SILENT
-    LD HL,(disk_DMA_address)
-    LD DE,0x80
-    ADD HL,DE
-    LD (disk_DMA_address),HL
+    ; Yes, restart at track 0, sector 1
+    JR NZ, WBOOT_SILENT
+    ; No, increase DMA by 128 bytes for the next sector
+    LD HL, (disk_DMA_address)
+    LD DE, sector_size
+    ADD HL, DE
+    LD (disk_DMA_address), HL
+    ; Store 0 in e407. Why?
     XOR A
-    LD (ram_e407),A
+    LD (ram_e407), A
+    ; Are we done?
     DEC B
-    JP Z,BOOT_SILENT
+    ; Yes, exec CCP
+    JP Z, BOOT_SILENT
+    ; No, next sector
     INC C
-    LD A,0x28
+    ; Are we past the last sector of track 0
+    LD A, sectors_per_track
     CP C
+    ; No, read the next sector
     JP NZ,WBOOT_LOOP
+    ; Yes, go to track 1, sector 16
     LD C,0x10
     PUSH BC
     LD C,0x1
     CALL SETTRK
     POP BC
+    ; Read the next sector
     JR WBOOT_LOOP
 
 CONST:
     ; Make sure the disk is off once every 256 calls
-    LD HL,CONST_COUNTER
+    LD HL, CONST_COUNTER
     INC (HL)
-    CALL Z,DISKOFF
-    ;
-    LD A,(iobyte)
-    AND 0x3
-    LD L,ROM_SIOSTI
-    JP Z,ROM_JUMP
-    LD L,ROM_KBDSTAT
+    CALL Z, DISKOFF
+    ; What is the console assigned device?
+    LD A, (iobyte)
+    AND iobyte_console_mask
+    LD L, ROM_SIOSTI
+    ; It's the serial port, query the serial port
+    JP Z, ROM_JUMP
+    ; It's the CRT, query the keyboard
+    LD L, ROM_KBDSTAT
     JP ROM_JUMP
 
 CONIN:
     CALL DISKOFF
-    LD A,(iobyte)
-    AND 0x3
-    LD L,ROM_SIOIN
-    JP Z,ROM_JUMP
-    LD L,ROM_KBDIN
+    ; What is the console assigned device?
+    LD A, (iobyte)
+    AND iobyte_console_mask
+    LD L, ROM_SIOIN
+    ; It's the TTY, query the serial port
+    JP Z, ROM_JUMP
+    ; It's the CRT, query the keyboard
+    LD L, ROM_KBDIN
     CALL ROM_JUMP
+    ; Process the keyboard output
     OR A
-    RET P
+    RET P ;??
     AND 0x1f ; control char conversion table is smaller than 32!!
+    ; Translate the control chars
     LD HL, control_char_conversion
-    LD C,A
-    LD B,0x0
-    ADD HL,BC
-    LD A,(HL)
+    LD C, A
+    LD B, 0x0
+    ADD HL, BC
+    LD A, (HL)
     RET
 
 DISKOFF:
@@ -192,68 +217,82 @@ DISKOFF:
     RET
 
 CONOUT:
-    LD A,(iobyte)
-    AND 0x3
-    LD L,ROM_SIOOUT
-    JP Z,ROM_JUMP
-    LD L,ROM_VIDOUT
+    ; What is the console assigned device?
+    LD A, (iobyte)
+    AND iobyte_console_mask
+    LD L, ROM_SIOOUT
+    ; It's the TTY, write to the serial port
+    JP Z, ROM_JUMP
+    ; It's the CRT, write to video memory
+    LD L, ROM_VIDOUT
     JP ROM_JUMP
 
 READER:
-    LD L,ROM_SIOIN
+    ; Only the TTY is supported
+    LD L, ROM_SIOIN
     JP ROM_JUMP
 
 PUNCH:
-    LD L,ROM_SIOOUT
+    ; Only the TTY is supported
+    LD L, ROM_SIOOUT
     JP ROM_JUMP
 
 LIST:
+    ; What is the list assigned device?
     LD A,(iobyte)
-    AND 0xc0
-    LD L,ROM_SIOOUT
-    JP Z,ROM_JUMP
-    LD L,ROM_LIST
-    CP 0x80
-    JP Z,ROM_JUMP
-    LD L,ROM_VIDOUT
-    CP 0x40
-    JP Z,ROM_JUMP
-    LD L,ROM_SIOOUT
+    AND iobyte_list_mask
+    ; It's the TTY, write to the serial port
+    LD L, ROM_SIOOUT
+    JP Z, ROM_JUMP
+    LD L, ROM_LIST
+    CP iobyte_list_PRT
+    ; It's the PRT, write to the parallel port
+    JP Z, ROM_JUMP
+    LD L, ROM_VIDOUT
+    CP iobyte_list_CRT
+    ; It's the CRT, write to video memory
+    JP Z, ROM_JUMP
+    LD L, ROM_SIOOUT
+    ; It's the UL1, write to the serial port
     JP ROM_JUMP
 
 LISTST:
+    ; What is the list assigned device?
     LD A,(iobyte)
-    AND 0xc0
-    LD L,ROM_SERSTO
-    JP Z,ROM_JUMP
-    LD L,ROM_LISTST
-    CP 0x80
-    JP Z,ROM_JUMP
+    AND iobyte_list_mask
+    ; It's the TTY, query the serial port
+    LD L, ROM_SERSTO
+    JP Z, ROM_JUMP
+    LD L, ROM_LISTST
+    CP iobyte_list_PRT
+    ; It's the PRT, write to the parallel port
+    JP Z, ROM_JUMP
+    ; It's the CRT or UL1, return always 0
     XOR A
     RET
 
 INITDSK:
-    LD L,ROM_INITDSK
+    LD L, ROM_INITDSK
     JR ROM_JUMP
 
 HOME:
-    LD L,ROM_HOME
+    LD L, ROM_HOME
     JR ROM_JUMP
 
 SELDSK:
-    LD L,ROM_SELDSK
+    LD L, ROM_SELDSK
     JR ROM_JUMP
 
 SETTRK:
-    LD L,ROM_SETTRK
+    LD L, ROM_SETTRK
     JR ROM_JUMP
 
 SETSEC:
-    LD L,ROM_SETSEC
+    LD L, ROM_SETSEC
     JR ROM_JUMP
 
 SETDMA:
-    LD L,ROM_SETDMA
+    LD L, ROM_SETDMA
     JR ROM_JUMP
 
 READ:
@@ -261,7 +300,7 @@ READ:
     XOR A
     LD (CONST_COUNTER), A
     ; Read
-    LD L,ROM_READ
+    LD L, ROM_READ
     JR ROM_JUMP
 
 WRITE:
@@ -274,13 +313,13 @@ WRITE:
     LD A,(bios_config)
     OR A
     ; Yes, write normally
-    JR Z,ROM_JUMP
+    JR Z, ROM_JUMP
     ; No, force the write type
-    LD C,rw_type_directory_write
+    LD C, rw_type_directory_write
     JR ROM_JUMP
 
 SECTRAN:
-    LD L,ROM_SECTRAN
+    LD L, ROM_SECTRAN
     JR ROM_JUMP
 
 ROM_JUMP:
@@ -335,23 +374,10 @@ STACK_SAVE:
     DW $EF35
 FILLER:
     DS 14, $00
-    DB $8E
-    DB $04
-    DB $8E
-    DB $04
-    DB $03
-    DB $04
-    DB $88
-    DB $9C
-    DB $C5
-    DB $04
-    DB $53
-    DB $FF
-    DB $14
-    DB $05
-    DB $0F
-    DB $04
-    DB $13
-    DB $06
-    DW ROM_JUMP_CLEANUP
+    DB $8E, $04, $8E, $04
+    DB $03, $04, $88, $9C
+    DB $C5, $04, $53, $FF
+    DB $14, $05, $0F, $04
+    DB $13, $06
+    DW ROM_JUMP_CLEANUP ; not used
 
