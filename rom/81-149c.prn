@@ -1,0 +1,1990 @@
+# File 81-149c.s
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; Analysis of the Kaypro II ROM 
+0000			; 
+0000			; Based on 81-149c.rom 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; NOTES: 
+0000			; 
+0000			;   From the code it looks like there is support for single density 
+0000			; and double density disks. FM or MFM encoding respectively. 
+0000			;   The entrypoints interface show sectors as having 128 bytes. 
+0000			;   For single density the sector size is 128 bytes. The code can go 
+0000			; directly to the fdc (floppy disk controller, a WD MD1793). 
+0000			;   For double density the sector size is 512 bytes. To simulate the 
+0000			; smaller sectors the code reads 512 bytes in a buffer and copies 
+0000			; the relevant 128 bytes. To do so, the code is much more complex as 
+0000			; commands can't be sent directly to the fdc. 
+0000			;   Surprsingly, it looks like there was not a Kaypro ever sold with 
+0000			; single density disks.  
+0000			; 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; CONSTANTS 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; I/O Ports 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			io_00_serial_baud_rate:     EQU 0x00 
+0000			io_04_serial_data:          EQU 0x04 
+0000			io_05_keyboard_data:        EQU 0x05 
+0000			io_06_serial_control:       EQU 0x06 
+0000			io_07_keyboard_control:     EQU 0x07 
+0000			io_08_parallel_data:        EQU 0x08 
+0000			io_09_parallel_control:     EQU 0x09 
+0000			io_0b_parallel_b_control:   EQU 0x0b 
+0000			io_0c_keyboad_baud_rate:    EQU 0x0c 
+0000			io_10_fdc_status:           EQU 0x10 ; as IN it is a get status 
+0000			io_10_fdc_command:          EQU 0x10 ; as OUT it is a command 
+0000			io_11_fdc_track:            EQU 0x11 
+0000			io_12_fdc_sector:           EQU 0x12 
+0000			io_13_fdc_data:             EQU 0x13 
+0000			io_14_scroll_register:      EQU 0x14 
+0000			io_1c_system_bits:          EQU 0x1c 
+0000			io_1d_system_bits_control:  EQU 0x1d 
+0000			 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; System bits 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			system_bit_drive_a:                 EQU 0 
+0000			system_bit_drive_b:                 EQU 1 
+0000			system_bit_unused:                  EQU 2 
+0000			system_bit_centronicsReady:         EQU 3 
+0000			system_bit_centronicsStrobe:        EQU 4 
+0000			system_bit_double_density_neg:      EQU 5 
+0000			system_bit_motors_neg:              EQU 6 
+0000			system_bit_bank:                    EQU 7 
+0000			 
+0000			system_bit_drive_a_mask:            EQU 0x01 
+0000			system_bit_drive_b_mask:            EQU 0x02 
+0000			system_bit_unused_mask:             EQU 0x04 
+0000			system_bit_centronicsReady_mask:    EQU 0x08 
+0000			system_bit_centronicsStrobe_mask:   EQU 0x10 
+0000			system_bit_double_density_neg_mask: EQU 0x20 
+0000			system_bit_motors_meg_mask:         EQU 0x40 
+0000			system_bit_bank_mask:               EQU 0x80 
+0000			 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; Console constants 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			address_vram:                    EQU 0x3000 
+0000			console_lines:                   EQU 24 
+0000			console_columns:                 EQU 80 
+0000			console_line_length:             EQU 0x80 ; There are 80 cols, but 128 bytes reserved for each line 
+0000			console_line_mask:               EQU 0x7f 
+0000			 
+0000			address_vram_end:                EQU address_vram + console_lines * console_line_length -1 ; 0x3bff 
+0000			address_vram_start_of_last_line: EQU address_vram_end - console_line_length + 1            ; 0x3b80 
+0000			 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; Disk constants 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			logical_sector_size:                EQU 128 ; See NOTES 
+0000			double_density_sector_size:         EQU 1024 ; See NOTES 
+0000			sectors_per_track_double_density:   EQU 40 ; See NOTES 
+0000			disk_count:                         EQU 2 ; 0 is A: and 1 is B: 
+0000			 
+0000			fdc_command_restore:                EQU 0x00 
+0000			fdc_command_read_address:           EQU 0xc4 
+0000			fdc_command_seek:                   EQU 0x10 
+0000			fdc_command_read_sector:            EQU 0x88 
+0000			fdc_command_write_sector:           EQU 0xac 
+0000			fdc_command_force_interrupt:        EQU 0xd0 
+0000			 
+0000			rw_mode_single_density: EQU 1 ; We read or write 128 bytes directly to/from DMA 
+0000			rw_mode_double_density: EQU 4 ; We read or write the full 512 bytes buffer 
+0000			 
+0000			fdc_status_record_busy_bit:         EQU 0 
+0000			fdc_status_record_not_found_bit:    EQU 4 
+0000			fdc_status_read_error_bitmask:      EQU 0x9c ; Not ready, record not found, crc error or lost data 
+0000			fdc_status_write_error_bitmask:     EQU 0xfc ; Not ready, write_protect, write fault, record not found, crc error or lost data 
+0000			 
+0000			; RET, used to set the NMI_ISR when the ROM is disabled 
+0000			RET_opcode:	       EQU 0xC9 
+0000			 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; The first boot sector has the info about 
+0000			; the rest of the boot sector loading 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			first_sector_load_address:     EQU 0xfa00 
+0000			address_to_load_second_sector: EQU 0xfa02 
+0000			address_to_exec_boot:          EQU 0xfa04 
+0000			count_of_boot_sectors_needed:  EQU 0xfa06 
+0000			 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; Disk related variables 
+0000			; Sector address is given by the DTS (Drive, Track and Sector) 
+0000			; For double density the sector is divided by 4 to account for 512 
+0000			; bytes sector. 
+0000			; See "Uninitialized RAM data areas" in Appendix G 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			 
+0000			; DTS with the user requested data. Uses losgical sectors of 128 bytes 
+0000			drive_selected:                 EQU 0xfc00 
+0000			track_selected:                 EQU 0xfc01 ; 2 bytes 
+0000			sector_selected:                EQU 0xfc03 
+0000			 
+0000			; DTS as understood by the floppy disk controller. Sectors are 512 bytes 
+0000			drive_in_fdc:                   EQU 0xfc04 
+0000			track_in_fdc:                   EQU 0xfc05 ; 2 bytes 
+0000			sector_in_fdc:                  EQU 0xfc07 
+0000			 
+0000			dd_sector_selected:             EQU 0xfc08 ; the double density sector is sector_selected / 4 
+0000			fdc_set_flag:                   EQU 0xfc09 ; 'hstact' 
+0000			pending_write_flag:             EQU 0xfc0a ; 'hstwrt' 
+0000			 
+0000			pending_count:                  EQU 0xfc0b 
+0000			drive_unallocated:              EQU 0xfc0c 
+0000			track_unallocated:              EQU 0xfc0d ; 2 bytes 
+0000			sector_unallocated:             EQU 0xfc0f 
+0000			 
+0000			rw_result:                      EQU 0xfc10 
+0000			 
+0000			read_needed_flag:               EQU 0xfc11 
+0000			read_not_needed:                EQU 0 
+0000			read_needed:                    EQU 1 
+0000			 
+0000			; See CP/M 2.2 System alteration guide appendix G 
+0000			operation_type:                 EQU 0xfc12 ; 'readop' in appendix G 
+0000			operation_type_write:           EQU 0 
+0000			operation_type_read:            EQU 1 
+0000			 
+0000			; See CP/M 2.2 System alteration guide, section 12 and appendix G 
+0000			rw_type:                        EQU 0xfc13 ; 'wrtype' in appendix G 
+0000			rw_type_normal_write:              EQU 0 ; write to allocated 
+0000			rw_type_directory_write:           EQU 1 
+0000			rw_type_read_or_unallocated_write: EQU 2 ; write to unallocated 
+0000			disk_DMA_address:               EQU 0xfc14 ; 2 bytes 
+0000			 
+0000			; There are 4 sector buffers. To select the buffer we get the sector modulo 4 
+0000			sector_buffer_base:             EQU 0xfc16 
+0000			sector_buffer_0:                EQU 0xfc16 
+0000			sector_buffer_1:                EQU 0xfc16 + logical_sector_size 
+0000			sector_buffer_2:                EQU 0xfc16 + logical_sector_size * 2 
+0000			sector_buffer_3:                EQU 0xfc16 + logical_sector_size * 3 
+0000			 
+0000			disk_active_drive:              EQU 0xfe16 
+0000			disk_density:                   EQU 0xfe17 
+0000			disk_density_double:            EQU 0x00 ; FM encoding 
+0000			disk_density_single:            EQU 0x20 ; MFM encoding 
+0000			disk_active_track_drive_a:      EQU 0xfe18 
+0000			disk_active_track_drive_b:      EQU 0xfe19 
+0000			disk_active_track_undefined:    EQU 0xff 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; Console related variables 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			console_esc_mode:               EQU 0xfe6c 
+0000			console_esc_mode_clear:         EQU 0 ; No ESC pending 
+0000			console_esc_mode_enabled:       EQU 1 ; Next char is the ESC command 
+0000			console_esc_mode_arg_1:         EQU 2 ; Next char is the first arg of the = command 
+0000			console_esc_mode_arg_2:         EQU 3 ; Next char is the second arg of the = command 
+0000			console_esc_equal_first_arg:    EQU 0xfe6d ; First arg of the esc= command 
+0000			console_cursor_position:        EQU 0xfe6e ; 2 bytes 
+0000			 
+0000			; On greek mode, the char is converted to a control char that is printed as a greek letter 
+0000			console_alphabet_mask:          EQU 0xfe70 
+0000			console_alphabet_ascii_mask:    EQU 0x7f 
+0000			console_alphabet_greek_mask:    EQU 0x1f 
+0000			 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; Entry points of code relocated to upper RAM 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			disk_params_destination:        EQU 0xfe71 
+0000			disk_parameter_header_0:        EQU 0xfe71 
+0000			disk_parameter_header_1:        EQU 0xfe82 
+0000			disk_parameter_block_single_density:    EQU 0xfe93 
+0000			disk_parameter_block_double_density:    EQU 0xfea2 
+0000			disk_sector_translation_table:  EQU 0xfeb1 
+0000			 
+0000			relocation_destination:         EQU 0xfecd 
+0000			relocation_offset:              EQU 0xfecd - 0x04a8  ; relocation_destination - block_to_relocate 
+0000			read_single_density_relocated:  EQU 0xfedc           ; reloc_single_density + relocation_offset 
+0000			move_RAM_relocated:             EQU 0xfecd           ; reloc_move_RAM + relocation_offset 
+0000			read_to_buffer_relocated:       EQU 0xfee3           ; reloc_read_to_buffer + relocation_offset 
+0000			write_from_buffer_relocated:    EQU 0xfef4           ; reloc_write_from_buffer + relocation_offset 
+0000			write_single_density_relocated: EQU 0xfeed           ; reloc_write_single_density + relocation_offset 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; Other addresses 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			CSV_0:      EQU 0xfe1a ; Scrathpad for change disk check, drive 0 
+0000			ALV_0:      EQU 0xfe2a ; Scrathpad for BDOS disk allocation, drive 0 
+0000			CSV_1:      EQU 0xfe43 ; Scrathpad for change disk check, drive 1 
+0000			ALV_1:      EQU 0xfe53 ; Scrathpad for BDOS disk allocation, drive 1 
+0000			DIRBUF:     EQU 0xff73 ; Address of a 128 byte scratchpad for BDOS dir ops 
+0000			 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; BIOS ENTRY POINTS 
+0000			; 
+0000			; Description of the entry points adapted from the KayPLUS manual. 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			 
+0000			ORG	0h 
+0000			    ; COLD: Resets entire computer system and is ALMOST like 
+0000			    ; pressing the RESET button. 
+0000			    ; Corresponds to CP/M BIOS function BOOT 
+0000 c3 4b 00		    JP EP_COLD 
+0003			 
+0003			    ; INITDSK: Resets the disk input/output buffer status to empty. 
+0003			    ; Any pending write is lost. Useful to perform a "soft" disk reset. 
+0003 c3 86 01		    JP EP_INITDSK 
+0006			 
+0006			    ; INITVID: Resets the video system. Video hardware is configured 
+0006			    ; and screen is cleared 
+0006 c3 05 06		    JP EP_INITVID 
+0009			 
+0009			    ; INITDEV: Initializes tall I/O ports. 
+0009 c3 68 05		    JP EP_INITDEV 
+000c			 
+000c			    ; HOME: Sets track number to 0 
+000c			    ; Corresponds to CP/M BIOS function HOME 
+000c c3 d8 01		    JP EP_HOME 
+000f			 
+000f			    ; SELDSK: Selects logical drive in register C (value of 0 through 1), 
+000f			    ; corresponding to drives A or B). SELDSK determines what type of 
+000f			    ; disk (density) is present in the drive. 
+000f			    ; Corresponds to CP/M BIOS function SELDSK 
+000f c3 b4 01		    JP EP_SELDSK 
+0012			 
+0012			    ; SETTRK: Sets the track number to the value in register BC. No seek 
+0012			    ; is actually performed until a disk read/write occurs. 
+0012			    ; Corresponds to CP/M BIOS function SETTRK 
+0012 c3 cc 01		    JP EP_SETTRK 
+0015			 
+0015			    ; SETSEC: Sets the logical sector number to the value in register C. 
+0015			    ; Corresponds to CP/M BIOS function SETSEC 
+0015 c3 bb 01		    JP EP_SETSEC 
+0018			 
+0018			    ; SETDMA: Specifies the DMA address where disk read/write occurs in 
+0018			    ; memory. The address in register pair BC is used until another DMA 
+0018			    ; address is specified. 
+0018			    ; Corresponds to CP/M BIOS function SETDMA 
+0018 c3 c7 01		    JP EP_SETDMA 
+001b			 
+001b			    ; READ: Reads the previously-specified logical sector from specified 
+001b			    ; track and disk into memory at the DMA address. Note that on 
+001b			    ; double-density disks and the hard drive, one physical sector may be 
+001b			    ; composed of up to eight logical sectors, so a physical disk read 
+001b			    ; may not actually occur. Returns disk status in A with zero 
+001b			    ; indicating no error occurred and a non-zero value indicating an 
+001b			    ; error. 
+001b			    ; Corresponds to CP/M BIOS function READ 
+001b c3 ec 01		    JP EP_READ 
+001e			 
+001e			    ; WRITE: Same as above, but writes from memory to disk. 
+001e			    ; Corresponds to CP/M BIOS function WRITE 
+001e c3 07 02		    JP EP_WRITE 
+0021			 
+0021			    ; SECTRAN: Translates logical sector number to physical sector number 
+0021			    ; Corresponds to CP/M BIOS function SECTRAN 
+0021 c3 e4 03		    JP EP_SECTRAN 
+0024			 
+0024			    ; DISKON: Turns on the disk drive. 
+0024 c3 0f 04		    JP EP_DISKON 
+0027			 
+0027			    ; DISKOFF: Turns off the disk drive. 
+0027 c3 1e 04		    JP EP_DISKOFF 
+002a			 
+002a			    ; KBDSTAT: Simply returns status of keyboard queue. Returns 0FFH if 
+002a			    ; a key is available, or 00H otherwise. 
+002a			    ; Corresponds to CP/M BIOS function CONST 
+002a c3 75 05		    JP EP_KBDSTAT 
+002d			 
+002d			    ; KBDIN: Gets character from keyboard buffer or waits for one, if 
+002d			    ; none ready.  
+002d			    ; Corresponds to CP/M BIOS function CONIN 
+002d c3 7d 05		    JP EP_KBDIN 
+0030			 
+0030			    ; KBDOUT: Sends the character in register A to the keyboard port. 
+0030 c3 88 05		    JP EP_KBDOUT 
+0033			 
+0033			    ; SIOSTI: Returns status of SIO-B input port. Returns 00H if no 
+0033			    ; character is ready, or 0FFH otherwise. 
+0033 c3 cc 05		    JP EP_SIOSTI 
+0036			 
+0036			    ; SIOIN: Gets character from SIO-B input port, or waits for one if 
+0036			    ; none is ready. 
+0036 c3 d2 05		    JP EP_SIOIN 
+0039			 
+0039			    ; SIOOUT: Sends character to SIO-B output port. 
+0039 c3 da 05		    JP EP_SIOOUT 
+003c			 
+003c			    ; LISTST: Returns the list status of the Centronics port: 00H is 
+003c			    ; returned if the printer is busy, 0FFH if ready. 
+003c c3 ea 05		    JP EP_LISTST 
+003f			 
+003f			    ; LIST: Sends the character in register C to the Centronics port. 
+003f c3 f2 05		    JP EP_LIST 
+0042			 
+0042			    ; SERSTO: Returns status of SIO-B output port. Returns 0FFH if SIO-B 
+0042			    ; is ready to accept a character for output, and 00H otherwise. 
+0042 c3 e4 05		    JP EP_SERSTO 
+0045			 
+0045			    ; VIDOUT: Sends character in register C to video screen. All characters 
+0045			    ; 20H (blank) to 7FH are directly displayed and screen scroll is done, 
+0045			    ; if required. Characters below 20H are defined as control characters. 
+0045 c3 1e 06		    JP EP_VIDOUT 
+0048			 
+0048			    ; DELAY: This entry point performs a "B times 10 mSec" delay. The 
+0048			    ; 10 mSec delay is preset for 4 MHz. "B" is the value in the B-register 
+0048			    ; and ranges from 1 to 256 decimal (0 is treated as 256). 
+0048 c3 25 04		    JP EP_DELAY 
+004b			 
+004b			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+004b			; INITIALIZATION AND BOOT FROM DISK 
+004b			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+004b			 
+004b			EP_COLD: 
+004b f3			    DI 
+004c 31 ff ff		    LD SP, 0xffff 
+004f 06 0a		    LD B, 0xa ; 100ms delay 
+0051 cd 25 04		    CALL EP_DELAY 
+0054			    ; Init the system, io ports, screen and memory 
+0054 cd 68 05		    CALL EP_INITDEV 
+0057 cd 05 06		    CALL EP_INITVID 
+005a cd 86 01		    CALL EP_INITDSK 
+005d			    ; Avoid the NMI entry point at 0x0066 
+005d 18 08		    JR EP_COLD_continue                         
+005f 3d 00 00 00 00 00 00	    DB 0x3D, 0, 0, 0, 0, 0, 0 
+0066			 
+0066			nmi_isr: 
+0066			    ; Just return from the interrupts generated 
+0066			    ; by the floppy controller 
+0066 c9			    RET 
+0067			 
+0067			EP_COLD_continue: 
+0067			    ; Show the wellcome message 
+0067 cd f2 07		    CALL console_write_string                    ; console_write_string uses the zero terminated 
+006a			                                                 ; string after the CALL 
+006a 1b .. 2a 3f	    DB 1Bh,"=", 0x20 + 0xa, 0x20 + 0x1f          ; ESC code, move to line 10, column 31 
+006e ..			    DB "*    KAYPRO II    *" 
+0081 1b .. 2d 34	    DB 1Bh,"=", 0x20 + 0xd, 0x20 + 0x14          ; ESC code, move to line 13, column 20 
+0085 ..			    DB " Please place your diskette into Drive A" 
+00ad 08			    DB 0x8                                       ; Cursor 
+00ae 00			    DB 0                                         ; End NUL terminated string 
+00af			 
+00af			    ; Read the first sector of the boot disk 
+00af 0e 00		    LD C,0x0 
+00b1 cd b4 01		    CALL EP_SELDSK 
+00b4 01 00 00		    LD BC,0x0 
+00b7 cd cc 01		    CALL EP_SETTRK 
+00ba 0e 00		    LD C,0x0 
+00bc cd bb 01		    CALL EP_SETSEC 
+00bf 01 00 fa		    LD BC, first_sector_load_address 
+00c2 cd c7 01		    CALL EP_SETDMA 
+00c5 cd ec 01		    CALL EP_READ 
+00c8 f3			    DI 
+00c9			    ; Verify the result 
+00c9 b7			    OR A 
+00ca 20 3e		    JR NZ, error_bad_disk 
+00cc			    ; Set the DMA destination as instructed by the info 
+00cc			    ; on the first boot sector 
+00cc ed 4b 02 fa	    LD BC, (address_to_load_second_sector) 
+00d0 ed 43 14 fc	    LD (disk_DMA_address), BC 
+00d4			    ; Store the boot exec addres on the stack. A RET will 
+00d4			    ; use this address and start executionthere 
+00d4 ed 4b 04 fa	    LD BC, (address_to_exec_boot) 
+00d8 c5			    PUSH BC 
+00d9			    ; Prepare the loading of the rest of the sectors 
+00d9 ed 4b 06 fa	    LD BC, (count_of_boot_sectors_needed) 
+00dd 41			    LD B,C 
+00de			    ; Continue reading from sector 1 
+00de 0e 01		    LD C,0x1 
+00e0			read_another_boot_sector: 
+00e0			    ; B has the count of sectors remaining 
+00e0			    ; C has the current sector number 
+00e0 c5			    PUSH BC 
+00e1			    ; Load sector C 
+00e1 cd bb 01		    CALL EP_SETSEC 
+00e4 cd ec 01		    CALL EP_READ 
+00e7 f3			    DI 
+00e8			    ; Verify the result 
+00e8 c1			    POP BC 
+00e9 b7			    OR A 
+00ea 20 1e		    JR NZ, error_bad_disk 
+00ec			    ; Increase by 128 the load address (logical sector size is 128 bytes) 
+00ec 2a 14 fc		    LD HL, (disk_DMA_address) 
+00ef 11 80 00		    LD DE, logical_sector_size 
+00f2 19			    ADD HL,DE                                     
+00f3 22 14 fc		    LD (disk_DMA_address), HL 
+00f6			    ; Decrease the count of sectors remaining 
+00f6 05			    DEC B 
+00f7			    ; If done , jump to the boot exec address previously pushed to the stack 
+00f7 c8			    RET Z 
+00f8			    ; Not finished, calculate the next sector and track 
+00f8 0c			    INC C 
+00f9 3e 28		    LD A, sectors_per_track_double_density 
+00fb			    ; Are we on the last sector of the track? 
+00fb b9			    CP C 
+00fc			    ; No, continue reading sector + 1 
+00fc 20 e2		    JR NZ,read_another_boot_sector 
+00fe			    ; Yes, track 0 completed. Continue with track 1, sector 10 
+00fe 0e 10		    LD C,0x10                                     
+0100 c5			    PUSH BC 
+0101			    ; Move to track 1 
+0101 01 01 00		    LD BC,0x0001 
+0104 cd cc 01		    CALL EP_SETTRK 
+0107 c1			    POP BC 
+0108			    ; Loop 
+0108 18 d6		    JR read_another_boot_sector 
+010a			 
+010a			error_bad_disk: 
+010a			    ; Error, write the error message and stop 
+010a cd f2 07		    CALL console_write_string 
+010d .. 00		    DB "\n\r\n\r\aI cannot read your diskette.",0 
+012f cd 1e 04		    CALL EP_DISKOFF 
+0132			wait_forever: 
+0132			    ; Lock the CPU forever 
+0132 18 fe		    JR wait_forever 
+0134			 
+0134			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0134			; INIT DISK. COPY CODE AND DISK PARAMS TO UPPER RAM. RESET VARIABLES 
+0134			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0134			; See CP/M 2.2 System alteration guide, section 10 
+0134			 
+0134			; This data will be copied starting 0xfe71 
+0134			disk_params: 
+0134			init_disk_parameter_header_0: ; to 0xfe71 
+0134 00 00		    DW 0x0000 ; XLT, logical translation table 
+0136 00 00 00 00 00 00	    DW 0x0000, 0x0000, 0x0000 ; Scrathpad for BDOS 
+013c 73 ff		    DW DIRBUF ; Address of additional scratchpad for BDOS, 
+013e a2 fe		    DW disk_parameter_block_double_density ; DPB 
+0140 1a fe		    DW CSV_0 
+0142 2a fe		    DW ALV_0 
+0144 00			    DB 0x00 ; Used by the BIOS to store the disk density 
+0145			 
+0145			init_disk_parameter_header_1: ; to 0xfe82 
+0145 00 00		    DW 0x0000 ; XLT, logical translation table 
+0147 00 00 00 00 00 00	    DW 0x0000, 0x0000, 0x0000 ; Scrathpad for BDOS 
+014d 73 ff		    DW DIRBUF ; Address of additional scratchpad for BDOS, 
+014f a2 fe		    DW disk_parameter_block_double_density ; DPB 
+0151 43 fe		    DW CSV_1 
+0153 53 fe		    DW ALV_1 
+0155 00			    DB 0x00 ; Used by the BIOS to store the disk density 
+0156			 
+0156			; Single density disk 
+0156			;   18 sectors (of 128 bytes) per track 
+0156			;   1024 bytes per allocation block 
+0156			;   83 kb total disk space 
+0156			;   40 tracks, 3 reserved 
+0156			init_disk_parameter_block_single_density: ; to 0xfe93 
+0156 12 00		    DW 18   ; SPT, sectors per track 
+0158 03			    DB 3    ; BSH, data alloc shift factor 
+0159 07			    DB 7    ; BLM 
+015a			    ; As BSH=3 and BLM=7, then BLS (data alocation size) is 1024. 
+015a 00			    DB 0    ; EXM, extent mask 
+015b 52 00		    DW 82   ; DSM, total storage in allocation blocks - 1 
+015d 1f 00		    DW 31   ; DRM, number of directory entries - 1 
+015f 80			    DB 0x80 ; AL0 
+0160 00			    DB 0x00 ; AL1 
+0161 08 00		    DW 8    ; CKS, directory check vector size 
+0163 03 00		    DW 3    ; OFF, number of reserved tracks 
+0165			 
+0165			; Single density disk 
+0165			;   40 sectors (128 bytes) per track 
+0165			;   1024 bytes per allocation block 
+0165			;   195 kb total disk space 
+0165			;   40 tracks, 1 reserved 
+0165			init_disk_parameter_block_double_density: ; to 0xfea2 
+0165 28 00		    DW 40   ; SPT, sectors per track 
+0167 03			    DB 3    ; BSH, data alloc shift factor 
+0168 07			    DB 7    ; BLM 
+0169			    ; As BSH=3 and BLM=7, then BLS (data alocation size) is 1024. 
+0169 00			    DB 0    ; EXM, extent mask 
+016a c2 00		    DW 194  ; DSM, total storage in allocation blocks - 1 
+016c 3f 00		    DW 63   ; DRM, number of directory entries - 1 
+016e f0			    DB 0xF0 ; AL0 
+016f 00			    DB 0x00 ; AL1 
+0170 10 00		    DW 16   ; CKS, directory check vector size 
+0172 01 00		    DW 1    ; OFF, number of reserved tracks 
+0174			 
+0174			init_sector_translation_table: ; 0xfeb1 
+0174			    ; Only used for single density 
+0174			    ; There is translation for 18 sectors. 
+0174 01 06 0b 10 03 08 0d 12	    DB 1, 6, 11, 16, 3, 8, 13, 18 
+017c 05 0a 0f 02 07 0c 11 04	    DB 5, 10, 15, 2, 7, 12, 17, 4 
+0184 09 0e		    DB 9, 14 
+0186			disk_params_end: 
+0186			 
+0186			EP_INITDSK: 
+0186			    ; Copy relocatable disk access to upper RAM to 
+0186			    ; be accessible even when the ROM is swapped out 
+0186 21 a8 04		    LD HL, block_to_relocate 
+0189 11 cd fe		    LD DE, relocation_destination 
+018c 01 87 00		    LD BC, block_to_relocate_end - block_to_relocate ;0x87 
+018f ed b0		    LDIR 
+0191			 
+0191			    ; Copy the disk parameters to upper RAM 
+0191 21 34 01		    LD HL, disk_params 
+0194 11 71 fe		    LD DE, disk_params_destination 
+0197 01 52 00		    LD BC, disk_params_end - disk_params ;0x52 
+019a ed b0		    LDIR 
+019c			 
+019c			    ; Init some variables 
+019c af			    XOR A 
+019d 32 09 fc		    LD (fdc_set_flag), A ; = No 
+01a0 32 0b fc		    LD (pending_count), A ; = 0 
+01a3 3e 00		    LD A, disk_density_double 
+01a5 32 17 fe		    LD (disk_density), A 
+01a8 3e ff		    LD A, disk_active_track_undefined 
+01aa 32 16 fe		    LD (disk_active_drive), A 
+01ad 32 18 fe		    LD (disk_active_track_drive_a), A 
+01b0 32 19 fe		    LD (disk_active_track_drive_b), A 
+01b3 c9			    RET 
+01b4			 
+01b4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+01b4			; FLOPPY DISK ENTRY POINTS 
+01b4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+01b4			 
+01b4			EP_SELDSK: 
+01b4			    ; C: disk number 
+01b4 79			    LD A,C 
+01b5 32 00 fc		    LD (drive_selected), A 
+01b8 c3 1d 03		    JP init_drive 
+01bb			 
+01bb			EP_SETSEC: 
+01bb			    ; BC: sector number 
+01bb 79			    LD A,C 
+01bc 32 03 fc		    LD (sector_selected), A 
+01bf			    ; Is the disk double density? 
+01bf 3a 17 fe		    LD A, (disk_density) 
+01c2 b7			    OR A 
+01c3			    ; No, send the sector to the controller 
+01c3 c2 e0 03		    JP NZ, fdc_set_sector 
+01c6			    ; Yes, we just store the sector number 
+01c6 c9			    RET 
+01c7			 
+01c7			EP_SETDMA: 
+01c7			    ; BC: DMA address 
+01c7 ed 43 14 fc	    LD (disk_DMA_address), BC 
+01cb c9			    RET 
+01cc			 
+01cc			EP_SETTRK: 
+01cc			    ; C: track number 
+01cc ed 43 01 fc	    LD (track_selected), BC 
+01d0			    ; Is the disk double density? 
+01d0 3a 17 fe		    LD A, (disk_density) 
+01d3 b7			    OR A 
+01d4			    ; No, send the track to the controller 
+01d4 c2 d4 03		    JP NZ, fdc_seek_track 
+01d7			    ; Yes, we just store the track number 
+01d7 c9			    RET 
+01d8			 
+01d8			EP_HOME: 
+01d8			    ;Is the disk double density? 
+01d8 3a 17 fe		    LD A, (disk_density) 
+01db b7			    OR A 
+01dc			    ; No, go to track 0 and return 
+01dc c2 cb 03		    JP NZ, fdc_seek_track_0 
+01df			    ; Yes. 
+01df			    ; Is a write pending? 
+01df 3a 0a fc		    LD A,(pending_write_flag) 
+01e2 b7			    OR A 
+01e3			    ; Yes, skip update 
+01e3 c2 e9 01		    JP NZ, skip_buffer_discard 
+01e6			    ; No, discard the buffer 
+01e6 32 09 fc		    LD (fdc_set_flag),A ; = No 
+01e9			skip_buffer_discard: 
+01e9 c3 cb 03		    JP fdc_seek_track_0 
+01ec			 
+01ec			EP_READ: 
+01ec			    ; Is disk double density? 
+01ec 3a 17 fe		    LD A,(disk_density) 
+01ef b7			    OR A 
+01f0			    ; No, go directly to the read routine 
+01f0 c2 dc fe		    JP NZ, read_single_density_relocated 
+01f3			    ; Yes, some preparation is needed as the calls to EP_SETSEC and 
+01f3			    ; EP_SETTRK did not send the info to the fdc for double density. 
+01f3			    ; Init variables 
+01f3 af			    XOR A 
+01f4 32 0b fc		    LD (pending_count),A ; = 0 
+01f7			    ; Starting from here it is equal to read in Appendix G 
+01f7 3e 01		    LD A, operation_type_read 
+01f9 32 12 fc		    LD (operation_type), A; = operation_type_read 
+01fc 32 11 fc		    LD (read_needed_flag), A ; = read_needed 
+01ff 3e 02		    LD A, rw_type_read_or_unallocated_write 
+0201 32 13 fc		    LD (rw_type),A 
+0204 c3 79 02		    JP read_write_double_density 
+0207			 
+0207			EP_WRITE: 
+0207			    ; C indicates the rw_type 
+0207			    ; Is disk double density? 
+0207 3a 17 fe		    LD A,(disk_density) 
+020a b7			    OR A 
+020b			    ; No, go directly to the write routine 
+020b c2 ed fe		    JP NZ, write_single_density_relocated 
+020e			    ; Yes, some preparation is needed as the calls to EP_SETSEC and 
+020e			    ; set_track did not send the info to the fdc on double density. 
+020e			    ; Starting from here it is equal to read in Appendix G 
+020e af			    XOR A 
+020f 32 12 fc		    LD (operation_type), A ; = operation_type_write 
+0212 79			    LD A,C 
+0213 32 13 fc		    LD (rw_type),A ; = C 
+0216 fe 02		    CP rw_type_read_or_unallocated_write 
+0218			    ; It's an allocated write, we can skip reset the 
+0218			    ; unallocated params to check if a read is needed. 
+0218 c2 32 02		    JP NZ, write_check_read_needed 
+021b 3e 08		    LD A, double_density_sector_size / logical_sector_size ; 8 
+021d 32 0b fc		    LD (pending_count),A ; = 8 
+0220			    ; Initialize the unallocated params 
+0220 3a 00 fc		    LD A, (drive_selected) 
+0223 32 0c fc		    LD (drive_unallocated), A 
+0226 2a 01 fc		    LD HL, (track_selected) 
+0229 22 0d fc		    LD (track_unallocated), HL 
+022c 3a 03 fc		    LD A, (sector_selected) 
+022f 32 0f fc		    LD (sector_unallocated), A 
+0232			write_check_read_needed: 
+0232			    ; Do we have pending logical sectors? 
+0232 3a 0b fc		    LD A,(pending_count) 
+0235 b7			    OR A 
+0236			    ; No, skip 
+0236 ca 71 02		    JP Z, write_with_read_needed 
+0239			    ; Yes, there are more unallocated records remaining 
+0239 3d			    DEC A 
+023a 32 0b fc		    LD (pending_count),A ; pending_count-1 
+023d			    ; Is drive requested different to the unallocated? 
+023d 3a 00 fc		    LD A, (drive_selected) 
+0240 21 0c fc		    LD HL, drive_unallocated 
+0243 be			    CP (HL) 
+0244			    ; Yes, the drive is different 
+0244 c2 71 02		    JP NZ, write_with_read_needed 
+0247			    ; The drives are the same 
+0247			    ; Is track requested different to the unallocated? 
+0247 21 0d fc		    LD HL, track_unallocated 
+024a cd 11 03		    CALL is_track_equal_to_track_selected 
+024d			    ; Yes, the track is different 
+024d c2 71 02		    JP NZ, write_with_read_needed 
+0250			    ; The tracks are the same 
+0250			    ; Is sector requested different to the unallocated? 
+0250 3a 03 fc		    LD A, (sector_selected) 
+0253 21 0f fc		    LD HL, sector_unallocated 
+0256 be			    CP (HL) 
+0257			    ; Yes, the sector is different 
+0257 c2 71 02		    JP NZ, write_with_read_needed 
+025a			    ; The sectors are the same 
+025a			    ; DTS on the unallocated variables match the requested DTS 
+025a			    ; Advance to the next sector to check if the next write will 
+025a			    ; be of the next sector. 
+025a 34			    INC (HL) 
+025b			    ; Are we at the end of the track? 
+025b 7e			    LD A,(HL) 
+025c fe 28		    CP sectors_per_track_double_density 
+025e			    ; No 
+025e da 6a 02		    JP C, write_with_read_not_needed 
+0261			    ; Yes, increase track and set sector to zero 
+0261 36 00		    LD (HL),0x0 
+0263 2a 0d fc		    LD HL, (track_unallocated) 
+0266 23			    INC HL 
+0267 22 0d fc		    LD (track_unallocated),HL 
+026a			write_with_read_not_needed: 
+026a af			    XOR A 
+026b 32 11 fc		    LD (read_needed_flag),A ; = read_not_needed 
+026e c3 79 02		    JP read_write_double_density 
+0271			write_with_read_needed: 
+0271 af			    XOR A 
+0272 32 0b fc		    LD (pending_count),A ; = 0 
+0275 3c			    INC A 
+0276 32 11 fc		    LD (read_needed_flag),A ; = read_needed 
+0279			 
+0279			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0279			; FLOPPY DISK INTERNAL IMPLEMENTATION READ AND WRITE 
+0279			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0279			     
+0279			read_write_double_density: 
+0279			    ; Reset the result variable 
+0279 af			    XOR A 
+027a 32 10 fc		    LD (rw_result),A ; = 0 
+027d			    ; Translate the sector logical address to the double density 
+027d			    ; address. As sector in DD are four times the size of sector 
+027d			    ; in SD, we divide by 4 (or shift right twice). 
+027d			    ; Sure? Ono some places its 8 times ??? 
+027d 3a 03 fc		    LD A, (sector_selected) 
+0280 b7			    OR A ; Clear carry 
+0281 1f			    RRA ; /2 
+0282 b7			    OR A ; Clear carry 
+0283 1f			    RRA ; /2 
+0284 32 08 fc		    LD (dd_sector_selected),A ; sector_selected / 4 
+0287			    ; Is fcd_position set 
+0287 21 09 fc		    LD HL, fdc_set_flag 
+028a 7e			    LD A,(HL) 
+028b 36 01		    LD (HL),0x1 ; fdc_set_flag = Yes 
+028d b7			    OR A 
+028e			    ; No, continue after updating the DTS_in_fdc variables 
+028e ca b5 02		    JP Z, rw_fdc_not_set 
+0291			    ; Yes 
+0291			    ; Are the fdc variables different from the selected? 
+0291 3a 00 fc		    LD A,(drive_selected) 
+0294 21 04 fc		    LD HL, drive_in_fdc 
+0297 be			    CP (HL) 
+0298			    ; Yes, the drive is different 
+0298 c2 ae 02		    JP NZ, rw_fdc_mismatch 
+029b			    ; Is track requested different to the xx? 
+029b 21 05 fc		    LD HL, track_in_fdc 
+029e cd 11 03		    CALL is_track_equal_to_track_selected 
+02a1			    ; Yes, the track is different 
+02a1 c2 ae 02		    JP NZ, rw_fdc_mismatch 
+02a4			    ; Is sector requested equals to the xx? 
+02a4 3a 08 fc		    LD A, (dd_sector_selected) 
+02a7 21 07 fc		    LD HL, sector_in_fdc 
+02aa be			    CP (HL) 
+02ab			    ; Yes, the sector is equal 
+02ab ca d2 02		    JP Z, rw_fdc_set 
+02ae			rw_fdc_mismatch: 
+02ae			    ; Is there a pending write on the buffer 
+02ae 3a 0a fc		    LD A, (pending_write_flag) 
+02b1 b7			    OR A 
+02b2			    ; Yes, write the buffer before continuing 
+02b2 c4 39 04		    CALL NZ, write_from_buffer_with_retries 
+02b5			    ; Now we can init the _in_fdc variables 
+02b5			rw_fdc_not_set: 
+02b5			    ; DTS_in_fdc = DTS_selected 
+02b5 3a 00 fc		    LD A, (drive_selected) 
+02b8 32 04 fc		    LD (drive_in_fdc),A 
+02bb 2a 01 fc		    LD HL, (track_selected) 
+02be 22 05 fc		    LD (track_in_fdc),HL 
+02c1 3a 08 fc		    LD A,(dd_sector_selected) 
+02c4 32 07 fc		    LD (sector_in_fdc),A 
+02c7			    ; Is a read needed 
+02c7 3a 11 fc		    LD A,(read_needed_flag) 
+02ca b7			    OR A 
+02cb			    ; Yes, read to fill the buffer 
+02cb c4 77 04		    CALL NZ, read_to_buffer_with_retries 
+02ce af			    XOR A 
+02cf 32 0a fc		    LD (pending_write_flag),A ; = no pending write 
+02d2			rw_fdc_set: 
+02d2			    ; Calculate the sector buffer to use for this sector    
+02d2 3a 03 fc		    LD A, (sector_selected) 
+02d5 e6 03		    AND 0x3 ; mod 4 
+02d7 6f			    LD L,A 
+02d8 26 00		    LD H,0x0 
+02da 29			    ADD HL,HL ; *2 
+02db 29			    ADD HL,HL ; *2 
+02dc 29			    ADD HL,HL ; *2 
+02dd 29			    ADD HL,HL ; *2 
+02de 29			    ADD HL,HL ; *2 
+02df 29			    ADD HL,HL ; *2 
+02e0 29			    ADD HL,HL ; *2. Combined *128 
+02e1 11 16 fc		    LD DE, sector_buffer_base 
+02e4 19			    ADD HL,DE 
+02e5			    ; HL = sector_buffer_base + (sector mod 4) * logical_sector_size 
+02e5 ed 5b 14 fc	    LD DE,(disk_DMA_address) 
+02e9 01 80 00		    LD BC,logical_sector_size 
+02ec			    ; 
+02ec 3a 12 fc		    LD A,(operation_type) 
+02ef b7			    OR A 
+02f0			    ; Yes, it's a read, skip write related coe 
+02f0 20 06		    JR NZ, copy_block_to_or_from_buffer 
+02f2 3e 01		    LD A,0x1 
+02f4 32 0a fc		    LD (pending_write_flag),A ; = 1 
+02f7			    ; Reverse the block copy direction 
+02f7 eb			    EX DE,HL 
+02f8			copy_block_to_or_from_buffer: 
+02f8			    ; Copy a sector from the buffer to the DMA 
+02f8 cd cd fe		    CALL move_RAM_relocated 
+02fb 3a 13 fc		    LD A, (rw_type) 
+02fe fe 01		    CP rw_type_directory_write 
+0300 3a 10 fc		    LD A, (rw_result) 
+0303			    ; Return if it is a read or a normal write 
+0303 c0			    RET NZ 
+0304 b7			    OR A 
+0305			    ; Return if last read/write had an error 
+0305 c0			    RET NZ 
+0306			    ; It is a directory write. Le's not wait and 
+0306			    ; save to disk now. (to be more reliable?) 
+0306 af			    XOR A 
+0307 32 0a fc		    LD (pending_write_flag),A ; = 0 
+030a cd 39 04		    CALL write_from_buffer_with_retries 
+030d 3a 10 fc		    LD A,(rw_result) 
+0310 c9			    RET 
+0311			 
+0311			is_track_equal_to_track_selected: 
+0311			    ; HL = address to a variable with the track 
+0311			    ; Returns flag Z set if they are equal. 
+0311			    ; This is not inline as the drive and sector comparison because 
+0311			    ; the track is two bytes. 
+0311 eb			    EX DE,HL 
+0312 21 01 fc		    LD HL, track_selected 
+0315 1a			    LD A,(DE) ; = track 
+0316 be			    CP (HL) 
+0317 c0			    RET NZ 
+0318 13			    INC DE 
+0319 23			    INC HL 
+031a 1a			    LD A,(DE) 
+031b be			    CP (HL) 
+031c c9			    RET 
+031d			 
+031d			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+031d			; FLOPPY DISK INTERNAL INIT 
+031d			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+031d			 
+031d			init_drive: 
+031d			    ; Change current drive, update the disk info and check density 
+031d			    ; C: drive number  
+031d 21 00 00		    LD HL,0x0 
+0320 79			    LD A,C 
+0321 fe 02		    CP disk_count 
+0323			    ; Ignore if the drive number is out of range 
+0323 d0			    RET NC 
+0324			    ; Point HL to the disk info for disk A or B 
+0324 b7			    OR A 
+0325 21 71 fe		    LD HL, disk_parameter_header_0 
+0328 28 03		    JR Z, disk_params_skip_for_drive_a 
+032a 21 82 fe		    LD HL, disk_parameter_header_1 
+032d			disk_params_skip_for_drive_a: 
+032d			    ; The current drive is the requested one? 
+032d 3a 16 fe		    LD A,(disk_active_drive) 
+0330 b9			    CP C 
+0331			    ; Yes, nothing to do 
+0331 c8			    RET Z 
+0332			    ; No, change the drive 
+0332			    ; Store the new drive number 
+0332 79			    LD A,C 
+0333 32 16 fe		    LD (disk_active_drive),A 
+0336 b7			    OR A 
+0337			    ; Set the read_address_state to the disk param $10 
+0337			    ; The param default is disk_density_double 
+0337 e5			    PUSH HL 
+0338 11 10 00		    LD DE,0x10 
+033b 19			    ADD HL,DE 
+033c 7e			    LD A,(HL) 
+033d 32 17 fe		    LD (disk_density),A 
+0340			    ; Load active track for disk a or b 
+0340 21 19 fe		    LD HL,disk_active_track_drive_b 
+0343 28 01		    JR Z, skip_for_drive_b 
+0345 2b			    DEC HL ; HL is disk_active_track_drive_a 
+0346			skip_for_drive_b: 
+0346 7e			    LD A,(HL) 
+0347			    ; Is the active track undefined? 
+0347 fe ff		    CP disk_active_track_undefined 
+0349			    ; Yes, skip. Why???? 
+0349 28 03		    JR Z, skip_get_track_number 
+034b			    ; No, get track number from the controller 
+034b db 11		    IN A,(io_11_fdc_track) 
+034d 77			    LD (HL),A; HL is disk_active_track_drive_x 
+034e			skip_get_track_number: 
+034e			    ; C is the disk number 
+034e 79			    LD A,C 
+034f b7			    OR A 
+0350			    ; Load active track for disk a or b 
+0350 21 18 fe		    LD HL, disk_active_track_drive_a 
+0353 28 01		    JR Z, skip_for_drive_a 
+0355 23			    INC HL; HL is disk_active_track_drive_b 
+0356			skip_for_drive_a: 
+0356 7e			    LD A,(HL) 
+0357			    ; Send the requested track to the controller 
+0357 d3 11		    OUT (io_11_fdc_track),A 
+0359 eb			    EX DE,HL 
+035a e1			    POP HL 
+035b			    ; Is the active track undefined? 
+035b fe ff		    CP disk_active_track_undefined 
+035d			    ; No, we are done 
+035d c0			    RET NZ 
+035e			    ; Yes 
+035e cd ef 03		    CALL prepare_drive 
+0361 cd d8 01		    CALL EP_HOME 
+0364			    ; Enable double density 
+0364 db 1c		    IN A,(io_1c_system_bits) 
+0366 e6 df		    AND ~system_bit_double_density_neg_mask           
+0368 f6 00		    OR 0x0 
+036a d3 1c		    OUT (io_1c_system_bits),A 
+036c			    ; Can we read the address in double density? 
+036c cd c1 03		    CALL fdc_read_address 
+036f			    ; Yes 
+036f 28 0e		    JR Z, set_double_density_disk 
+0371			    ; No, retry with single density 
+0371			    ; Disbable double density 
+0371 db 1c		    IN A,(io_1c_system_bits) 
+0373 e6 df		    AND ~system_bit_double_density_neg_mask 
+0375 f6 20		    OR system_bit_double_density_neg_mask 
+0377 d3 1c		    OUT (io_1c_system_bits),A 
+0379			    ; Can we read the address? 
+0379 cd c1 03		    CALL fdc_read_address 
+037c			    ; No, there is nothing we can do 
+037c c0			    RET NZ 
+037d			    ; Yes 
+037d 18 1e		    JR set_single_density_disk 
+037f			 
+037f			set_double_density_disk: 
+037f			    ; HL is disk_parameter_header 
+037f e5			    PUSH HL 
+0380 d5			    PUSH DE 
+0381			    ; Set no sector tran on the disk params $0 and $1 
+0381 11 00 00		    LD DE,0x0000 
+0384 73			    LD (HL),E 
+0385 23			    INC HL 
+0386 72			    LD (HL),D 
+0387			    ; Set DPB for double density on the disk params $a and $b 
+0387 11 09 00		    LD DE,0x0009 
+038a 19			    ADD HL,DE 
+038b 11 a2 fe		    LD DE, disk_parameter_block_double_density 
+038e 73			    LD (HL),E 
+038f 23			    INC HL 
+0390 72			    LD (HL),D 
+0391			    ; Set disk_density_double in the disk param $10 
+0391 11 05 00		    LD DE,0x0005 
+0394 19			    ADD HL,DE 
+0395 3e 00		    LD A, disk_density_double 
+0397 77			    LD (HL),A 
+0398			    ; Store the current disk density 
+0398 32 17 fe		    LD (disk_density),A 
+039b 18 1c		    JR fdc_init_drive 
+039d			 
+039d			set_single_density_disk: 
+039d			    ; HL is disk_parameter_header 
+039d e5			    PUSH HL 
+039e d5			    PUSH DE 
+039f			    ; Set the sector translation table on the disk params $0 and $1 
+039f 11 b1 fe		    LD DE, disk_sector_translation_table 
+03a2 73			    LD (HL),E 
+03a3 23			    INC HL 
+03a4 72			    LD (HL),D 
+03a5			    ; Set the DPB on the disk params $a and $b 
+03a5 11 09 00		    LD DE,0x0009 
+03a8 19			    ADD HL,DE 
+03a9 11 93 fe		    LD DE, disk_parameter_block_single_density 
+03ac 73			    LD (HL),E 
+03ad 23			    INC HL 
+03ae 72			    LD (HL),D 
+03af			    ; Set disk_density_single in the disk param $10 
+03af 11 05 00		    LD DE,0x0005 
+03b2 19			    ADD HL,DE 
+03b3 3e 20		    LD A, disk_density_single 
+03b5 77			    LD (HL),A 
+03b6			    ; Store the current disk density 
+03b6 32 17 fe		    LD (disk_density),A 
+03b9			 
+03b9			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+03b9			; FLOPPY DISK CONTROLLER ACCESS 
+03b9			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+03b9			 
+03b9			fdc_init_drive: 
+03b9 d1			    POP DE ; DE is disk_active_track_drive_x 
+03ba e1			    POP HL ; HL is disk_parameter_header 
+03bb			    ; Why set track with the sector value???? 
+03bb db 12		    IN A,(io_12_fdc_sector) 
+03bd d3 11		    OUT (io_11_fdc_track),A 
+03bf			    ; Update disk_active_track_drive_x 
+03bf 12			    LD (DE),A 
+03c0 c9			    RET 
+03c1			 
+03c1			fdc_read_address: 
+03c1			    ; FDC read address command 
+03c1 3e c4		    LD A, fdc_command_read_address 
+03c3 d3 10		    OUT (io_10_fdc_command), A 
+03c5 cd 31 04		    CALL wait_for_result 
+03c8			    ; Is record not found? 
+03c8 cb 67		    BIT fdc_status_record_not_found_bit, A 
+03ca c9			    RET 
+03cb			 
+03cb			fdc_seek_track_0: 
+03cb cd ef 03		    CALL prepare_drive 
+03ce			    ; Restore controller 
+03ce 3e 00		    LD A, fdc_command_restore 
+03d0 d3 10		    OUT (io_10_fdc_command), A 
+03d2 18 5d		    JR wait_for_result 
+03d4			 
+03d4			fdc_seek_track: 
+03d4			    ; C: track number 
+03d4 cd ef 03		    CALL prepare_drive 
+03d7 79			    LD A,C 
+03d8			    ; Request seek track C 
+03d8 d3 13		    OUT (io_13_fdc_data),A 
+03da 3e 10		    LD A, fdc_command_seek 
+03dc d3 10		    OUT (io_10_fdc_command),A 
+03de 18 51		    JR wait_for_result 
+03e0			 
+03e0			fdc_set_sector: 
+03e0			    ; C = sector 
+03e0 79			    LD A,C 
+03e1 d3 12		    OUT (io_12_fdc_sector),A 
+03e3 c9			    RET 
+03e4			 
+03e4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+03e4			; FLOPPY DISK MORE ENTRYPOINTS 
+03e4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+03e4			 
+03e4			EP_SECTRAN: 
+03e4			    ; BC = sector 
+03e4			    ; DE = pointer to the translation table 
+03e4			    ; Returns in HL the translated sector 
+03e4 7a			    LD A,D 
+03e5 b3			    OR E 
+03e6 60			    LD H,B 
+03e7 69			    LD L,C ; HL = BC; Why is this needed? 
+03e8			    ; Return if there is no translation table (DE=0x0000) 
+03e8 c8			    RET Z 
+03e9 eb			    EX DE,HL ; HL <> DE 
+03ea 09			    ADD HL,BC ; HL = sector + BC 
+03eb 6e			    LD L,(HL) 
+03ec 26 00		    LD H,0x0 
+03ee c9			    RET 
+03ef			 
+03ef			prepare_drive: 
+03ef			    ; 1: Interrupt any pending floppy disk controller command. 
+03ef e5			    PUSH HL 
+03f0 d5			    PUSH DE 
+03f1 c5			    PUSH BC 
+03f2			    ; 1: Interrupt any pending floppy disk controller command. 
+03f2 3e d0		    LD A, fdc_command_force_interrupt 
+03f4 d3 10		    OUT (io_10_fdc_command), A 
+03f6			    ; 2: Start the motor 
+03f6 cd 0f 04		    CALL EP_DISKON 
+03f9			    ; 3; Update the systems bits for the proper selected drive and density. 
+03f9 3a 16 fe		    LD A, (disk_active_drive) 
+03fc 5f			    LD E,A 
+03fd db 1c		    IN A,(io_1c_system_bits) 
+03ff			    ; Clear drive select bits 
+03ff e6 fc		    AND ~ (system_bit_drive_a_mask|system_bit_drive_b_mask) 
+0401			    ; Add the bit of the drive selected 
+0401 b3			    OR E 
+0402 3c			    INC A ; disk A(0) to mask 0x1, disk B(1) to mask 0x2 
+0403			    ; Clear the double density bit 
+0403 e6 df		    AND ~system_bit_double_density_neg_mask 
+0405			    ; Reflect the disk density variable on the system bits. 
+0405 21 17 fe		    LD HL, disk_density 
+0408 b6			    OR (HL) 
+0409			    ; Store the modified system bits 
+0409 d3 1c		    OUT (io_1c_system_bits), A 
+040b c1			    POP BC 
+040c d1			    POP DE 
+040d e1			    POP HL 
+040e c9			    RET 
+040f			 
+040f			EP_DISKON: 
+040f			    ; Turns the motor on, if it is already on it can return immediately. 
+040f			    ; It was off, it is started and there is a delay yo let the motors 
+040f			    ; get some speed. 
+040f			    ; 
+040f			    ; Is it already on? 
+040f db 1c		    IN A,(io_1c_system_bits) 
+0411 cb 77		    BIT system_bit_motors_neg,A 
+0413			    ; Yes, return 
+0413 c8			    RET Z 
+0414			    ; No, turn on 
+0414 cb b7		    RES system_bit_motors_neg,A 
+0416 d3 1c		    OUT (io_1c_system_bits),A 
+0418			    ; Wait for the motor to get some speed 
+0418 06 32		    LD B,0x32; 500ms delay 
+041a cd 25 04		    CALL EP_DELAY 
+041d c9			    RET 
+041e			 
+041e			EP_DISKOFF: 
+041e			    ; Turn off in any case 
+041e db 1c		    IN A,(io_1c_system_bits) 
+0420 cb f7		    SET system_bit_motors_neg,A 
+0422 d3 1c		    OUT (io_1c_system_bits),A 
+0424 c9			    RET 
+0425			 
+0425			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0425			; WAIT 
+0425			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0425			 
+0425			EP_DELAY: 
+0425			    ; wait time in B 
+0425 11 86 06		    LD DE,0x686 
+0428			EP_DELAY_inner_loop: 
+0428 1b			    DEC DE 
+0429 7a			    LD A,D 
+042a b3			    OR E 
+042b c2 28 04		    JP NZ, EP_DELAY_inner_loop 
+042e			    ; Do DELAY again with B-1 
+042e 10 f5		    DJNZ EP_DELAY 
+0430 c9			    RET 
+0431			 
+0431			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0431			; FLOPPY DISK INTERNAL MORE IMPLEMENTATION READ AND WRITE 
+0431			; 
+0431			; Actual read and write used by the Appendix G algorithm 
+0431			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0431			 
+0431			wait_for_result: 
+0431			    ; The fdc generates a NMI when it requires attention. The NMI handler 
+0431			    ; is just a RET that will stop the HALT and execute the next instruction. 
+0431 76			    HALT 
+0432			wait_while_busy: 
+0432 db 10		    IN A,(io_10_fdc_status) 
+0434 cb 47		    BIT fdc_status_record_busy_bit, A 
+0436 20 fa		    JR NZ,wait_while_busy 
+0438 c9			    RET 
+0439			 
+0439			write_from_buffer_with_retries: 
+0439 2e 03		    LD L, 3 ; retry 3 times if verification fails 
+043b			write_full_retry: 
+043b 11 0f 04		    LD DE,0x040f ; retry 15 times without seek. Repeat all up to 4 times with seek0 
+043e			write_retry: 
+043e e5			    PUSH HL 
+043f d5			    PUSH DE 
+0440 cd 92 04		    CALL fcd_seek_sector 
+0443 cd f4 fe		    CALL write_from_buffer_relocated 
+0446 d1			    POP DE 
+0447 e1			    POP HL 
+0448			    ; If write success, verify the write 
+0448 28 0d		    JR Z, verify_write 
+044a 1d			    DEC E 
+044b			    ; Retry without moving the head home 
+044b 20 f1		    JR NZ, write_retry 
+044d 15			    DEC D 
+044e			    ; Do not retry anymore 
+044e 28 1c		    JR Z, process_result 
+0450			    ; Mode the head to track 0 to retry making sure the head is moved. 
+0450 cd cb 03		    CALL fdc_seek_track_0 
+0453 1e 0f		    LD E,0xf 
+0455 18 e7		    JR write_retry 
+0457			 
+0457			verify_write: 
+0457 06 00		    LD B,0x0 ; loop for 256 bytes 
+0459 3e 88		    LD A, fdc_command_read_sector 
+045b d3 10		    OUT (io_10_fdc_command),A 
+045d			read_first_256_bytes_loop: 
+045d			    ; Test read 256 bytes (B from 0 and back to 0) 
+045d 76			    HALT 
+045e db 13		    IN A,(io_13_fdc_data) 
+0460 10 fb		    DJNZ read_first_256_bytes_loop 
+0462			read_second_256_bytes_loop: 
+0462			    ; Test read 256 bytes (B from 0 and back to 0) 
+0462 76			    HALT 
+0463 db 13		    IN A,(io_13_fdc_data) 
+0465 10 fb		    DJNZ read_second_256_bytes_loop 
+0467 cd 31 04		    CALL wait_for_result 
+046a			    ; Use only the error related bits 
+046a e6 9c		    AND fdc_status_read_error_bitmask 
+046c			process_result: 
+046c 32 10 fc		    LD (rw_result),A 
+046f			    ; No errors, return 
+046f c8			    RET Z 
+0470			    ; If we have retries lett, retry 
+0470 2d			    DEC L 
+0471 20 c8		    JR NZ, write_full_retry 
+0473			    ; No more retries, exit with error ff 
+0473 3e ff		    LD A,0xff 
+0475 18 f5		    JR process_result 
+0477			 
+0477			read_to_buffer_with_retries: 
+0477			    ; Load a full 512 bytes double density sector in the buffer. 
+0477			    ; It is retried 15*4 times. Every 15 tries the head is fully moved 
+0477			    ; to track 0 and moved to the requested track. 
+0477 11 0f 04		    LD DE,0x040f ; retry 15 times without seek. Repeat all up to 4 times with seek0 
+047a			read_retry: 
+047a d5			    PUSH DE 
+047b cd 92 04		    CALL fcd_seek_sector 
+047e			    ; Read 512 bytes 
+047e cd e3 fe		    CALL read_to_buffer_relocated 
+0481 32 10 fc		    LD (rw_result), A 
+0484 d1			    POP DE 
+0485			    ; Read success, exit 
+0485 c8			    RET Z 
+0486 1d			    DEC E 
+0487			    ; Retry without moving the head home 
+0487 20 f1		    JR NZ,read_retry 
+0489 15			    DEC D 
+048a			    ; Do not retry anymore 
+048a c8			    RET Z 
+048b			    ; Mode the head to track 0 to retry making sure the head is moved. 
+048b cd cb 03		    CALL fdc_seek_track_0 
+048e 1e 0f		    LD E,0xf 
+0490 18 e8		    JR read_retry 
+0492			 
+0492			fcd_seek_sector: 
+0492			    ; Put the disk to the requested position 
+0492 3a 04 fc		    LD A,(drive_in_fdc) 
+0495 4f			    LD C,A 
+0496 cd 1d 03		    CALL init_drive 
+0499 ed 4b 05 fc	    LD BC,(track_in_fdc) 
+049d cd d4 03		    CALL fdc_seek_track 
+04a0 3a 07 fc		    LD A,(sector_in_fdc) 
+04a3 4f			    LD C,A 
+04a4 cd e0 03		    CALL fdc_set_sector 
+04a7 c9			    RET 
+04a8			 
+04a8			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+04a8			; CODE RELOCATED TO UPPER RAM 
+04a8			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+04a8			 
+04a8			block_to_relocate: 
+04a8			reloc_move_RAM: 
+04a8			    ; Hide the ROM 
+04a8 db 1c		    IN A,(io_1c_system_bits) 
+04aa cb bf		    RES system_bit_bank,A 
+04ac d3 1c		    OUT (io_1c_system_bits),A 
+04ae			    ; Copy the bytes 
+04ae ed b0		    LDIR 
+04b0			    ; Show the ROM 
+04b0 db 1c		    IN A,(io_1c_system_bits) 
+04b2 cb ff		    SET system_bit_bank,A 
+04b4 d3 1c		    OUT (io_1c_system_bits),A 
+04b6 c9			    RET 
+04b7			 
+04b7			reloc_read_single_density: 
+04b7			    ; Read 128 bytes into DMA 
+04b7 2a 14 fc		    LD HL,(disk_DMA_address) 
+04ba 06 01		    LD B, rw_mode_single_density 
+04bc 18 05		    JR reloc_read_internal 
+04be			reloc_read_to_buffer: 
+04be			    ; Read 512 bytes into buffer 
+04be 21 16 fc		    LD HL, sector_buffer_base 
+04c1 06 04		    LD B, rw_mode_double_density 
+04c3			reloc_read_internal: 
+04c3			    ; Configure RW for read 
+04c3 11 88 9c		    LD DE, fdc_status_read_error_bitmask * 0x100 + fdc_command_read_sector 
+04c6 18 0f		    JR reloc_RW_internal 
+04c8			 
+04c8			reloc_write_single_density: 
+04c8			    ; Write 128 bytes from DMA 
+04c8 2a 14 fc		    LD HL, (disk_DMA_address) 
+04cb 06 01		    LD B, rw_mode_single_density 
+04cd 18 05		    JR reloc_write_internal 
+04cf			reloc_write_from_buffer: 
+04cf			    ; Write 512 bytes from buffer 
+04cf 21 16 fc		    LD HL, sector_buffer_base 
+04d2 06 04		    LD B, rw_mode_double_density 
+04d4			reloc_write_internal: 
+04d4			    ; Configure RW for write 
+04d4 11 ac fc		    LD DE, fdc_status_write_error_bitmask * 0x100 + fdc_command_write_sector 
+04d7			 
+04d7			reloc_RW_internal: 
+04d7 cd ef 03		    CALL prepare_drive; Call in the ROM area 
+04da f3			    DI 
+04db			    ; Hide the ROM. No more calls to the ROM passed this instruction 
+04db db 1c		    IN A,(io_1c_system_bits) 
+04dd cb bf		    RES system_bit_bank,A 
+04df d3 1c		    OUT (io_1c_system_bits),A 
+04e1			    ; Setup RET as the handler of NMI 
+04e1			    ; As the ROM is paged out, there is no handler. 
+04e1 e5			    PUSH HL 
+04e2			    ; Store in A' the current first byte on 0x66 
+04e2 21 66 00		    LD HL, nmi_isr 
+04e5 7e			    LD A,(HL) 
+04e6 08			    EX AF,AF' ; ' 
+04e7			    ; Set RET as the handler of NMI 
+04e7 36 c9		    LD (HL), RET_opcode 
+04e9 e1			    POP HL 
+04ea			    ; 
+04ea 78			    LD A,B ; A = rw_mode 
+04eb 01 13 80		    LD BC, logical_sector_size * 0x100 + io_13_fdc_data  ; Setup of the INI command 
+04ee cb 47		    BIT 0x0,A  
+04f0 20 02		    JR NZ, read_rw_internal_cont 
+04f2			    ; For rw_mode_double_density let's set B to zero 
+04f2 06 00		    LD B,0x0 
+04f4			read_rw_internal_cont: 
+04f4			    ; Is mode single density? 
+04f4 fe 01		    CP rw_mode_single_density 
+04f6 f5			    PUSH AF 
+04f7 7b			    LD A,E 
+04f8			    ; Is the command a write? 
+04f8 fe ac		    CP fdc_command_write_sector 
+04fa			    ; Yes, go to write 
+04fa 28 11		    JR Z, reloc_write_sector 
+04fc			    ; No, let's read 
+04fc d3 10		    OUT (io_10_fdc_command),A 
+04fe f1			    POP AF 
+04ff			    ; If the mode is single density, let's read the 128 bytes 
+04ff 28 05		    JR Z, reloc_read_the_rest 
+0501			reloc_read_first_256_bytes: 
+0501 76			    HALT 
+0502 ed a2		    INI ; IN from io_13_fdc_data 
+0504 20 fb		    JR NZ, reloc_read_first_256_bytes 
+0506			reloc_read_the_rest: 
+0506			    ; The rest will be 256 bytes on buffer mode and 128 bytes in single density mode 
+0506 76			    HALT 
+0507 ed a2		    INI ; IN from io_13_fdc_data 
+0509 20 fb		    JR NZ, reloc_read_the_rest 
+050b			    ; We are done 
+050b 18 0f		    JR read_write_sector_completed 
+050d			 
+050d			reloc_write_sector: 
+050d d3 10		    OUT (io_10_fdc_command),A ; A = fdc_command_write_sector 
+050f f1			    POP AF 
+0510			    ; if the mode is single density, let's write the 128 bytes 
+0510 28 05		    JR Z, reloc_write_the_rest 
+0512			reloc_write_first_256_bytes: 
+0512 76			    HALT 
+0513 ed a3		    OUTI ; OUT to io_13_fdc_data 
+0515 20 fb		    JR NZ,reloc_write_first_256_bytes 
+0517			reloc_write_the_rest: 
+0517			    ; The rest will be 256 bytes on buffer mode and 128 bytes in single density mode 
+0517 76			    HALT 
+0518 ed a3		    OUTI ; OUT to io_13_fdc_data 
+051a 20 fb		    JR NZ, reloc_write_the_rest 
+051c			 
+051c			read_write_sector_completed: 
+051c			    ; Restore the byte that was on the NMI handler 
+051c 08			    EX AF,AF' ; '  
+051d 32 66 00		    LD (nmi_isr),A 
+0520			    ; Restore the ROM 
+0520 db 1c		    IN A,(io_1c_system_bits) 
+0522 cb ff		    SET system_bit_bank,A 
+0524 d3 1c		    OUT (io_1c_system_bits),A 
+0526 fb			    EI 
+0527			    ; Wait for the disk access result code 
+0527 cd 31 04		    CALL wait_for_result 
+052a			    ; Return the result code: 0 or 1 
+052a a2			    AND D ; fdc_status_read_error_bitmask or fdc_status_write_error_bitmask 
+052b			    ; If no error return with A = 0 
+052b c8			    RET Z 
+052c			    ; If error return with A = 1 
+052c 3e 01		    LD A,0x1 
+052e c9			    RET 
+052f			block_to_relocate_end: 
+052f			 
+052f			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+052f			; IO PORTS INITIALIZATION 
+052f			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+052f			 
+052f			init_ports_count: 
+052f 1c			    DB 0x1C 
+0530			init_ports_data: 
+0530			    ; Keyboard, SIO-B. See Z80-SIO Technical Manual 
+0530 07 18		    DB io_07_keyboard_control, 0x18 ; Reset 
+0532 0c 05		    DB io_0c_keyboad_baud_rate, 0x05 ; Set 8816 clock generator to 300 baud 
+0534 07 04		    DB io_07_keyboard_control, 0x04 ; WR4 
+0536 07 44		    DB io_07_keyboard_control, 0x44 ;   = 0x44, CLK/32, 1 Stop bit, no parity 
+0538 07 03		    DB io_07_keyboard_control, 0x03 ; WR3 
+053a 07 c1		    DB io_07_keyboard_control, 0xC1 ;   = 0xc1, 8bits, RX enable 
+053c 07 05		    DB io_07_keyboard_control, 0x05 ; WR5 
+053e 07 e8		    DB io_07_keyboard_control, 0xE8 ;   = 0xe8, 8bits TX, TX enable, DTR 
+0540 07 01		    DB io_07_keyboard_control, 0x01 ; WR1 
+0542 07 00		    DB io_07_keyboard_control, 0x00 ;   = 0x00, disable interrupts 
+0544			 
+0544			    ; Serial port, SIO-A. See Z80-SIO Technical Manual 
+0544 06 18		    DB io_06_serial_control, 0x18 ; Reset 
+0546 00 05		    DB io_00_serial_baud_rate, 0x05 ; Set 8816 clock generator to 300 baud 
+0548 06 04		    DB io_06_serial_control, 0x04 ; WR4 
+054a 06 44		    DB io_06_serial_control, 0x44 ;   = 0x44, CLK/32, 1 Stop bit, no parity 
+054c 06 03		    DB io_06_serial_control, 0x03 ; WR3 
+054e 06 e1		    DB io_06_serial_control, 0xE1 ;   = 0xe1, 8bits, auto-enable, RX enable 
+0550 06 05		    DB io_06_serial_control, 0x05 ; WR5 
+0552 06 e8		    DB io_06_serial_control, 0xE8 ;   = 0xe8, 8bits TX, TX enable, DTR 
+0554 06 01		    DB io_06_serial_control, 0x01 ; WR1 
+0556 06 00		    DB io_06_serial_control, 0x00 ;   = 0x00, disable interrupts 
+0558			 
+0558			    ; System bits, PIO-2A. See Z80-PIO Technical Manual 
+0558 1d 03		    DB io_1d_system_bits_control, 0x03 ; Enable interrupts with AND 
+055a 1c 81		    DB io_1c_system_bits, 0x81 ;  system_bits = 0x81, drive A, ROM enabled 
+055c 1d cf		    DB io_1d_system_bits_control, 0xCF ; set mode 3-control 
+055e 1d 0c		    DB io_1d_system_bits_control, 0x0C ; direction = IIOO_OOOO 
+0560			 
+0560			    ; Parallel port, PIO-1A. See Z80-PIO Technical Manual 
+0560 09 03		    DB io_09_parallel_control, 0x03 ; Enable interrupts with AND 
+0562 09 0f		    DB io_09_parallel_control, 0x0F ; set mode 0-output 
+0564			 
+0564			    ; Parallel port, PIO-1B. See Z80-PIO Technical Manual 
+0564 0b 03		    DB io_0b_parallel_b_control, 0x03 ; Enable interrupts with AND 
+0566 0b 4f		    DB io_0b_parallel_b_control, 0x4F ; set mode 1-input 
+0568			EP_INITDEV: 
+0568 21 2f 05		    LD HL,init_ports_count 
+056b 46			    LD B,(HL) 
+056c			init_ports_loop: 
+056c 23			    INC HL 
+056d 4e			    LD C,(HL) 
+056e 23			    INC HL 
+056f 7e			    LD A,(HL) 
+0570			    ; An out for each pair of bytes in init_ports_data 
+0570 ed 79		    OUT (C),A 
+0572 10 f8		    DJNZ init_ports_loop 
+0574 c9			    RET 
+0575			 
+0575			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0575			; KEYBOARD 
+0575			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0575			 
+0575			EP_KBDSTAT: 
+0575			    ; return 0 or FF in A 
+0575 db 07		    IN A, (io_07_keyboard_control) 
+0577 e6 01		    AND 0x1 
+0579 c8			    RET Z 
+057a 3e ff		    LD A,0xff 
+057c c9			    RET 
+057d			 
+057d			EP_KBDIN: 
+057d			    ; return char in A 
+057d cd 75 05		    CALL EP_KBDSTAT 
+0580 28 fb		    JR Z, EP_KBDIN 
+0582 db 05		    IN A, (io_05_keyboard_data) 
+0584 cd 92 05		    CALL translate_keyboard_in_a 
+0587 c9			    RET 
+0588			 
+0588			EP_KBDOUT: 
+0588			    ; char in C. C=4 for the bell. 
+0588 db 07		    IN A, (io_07_keyboard_control) 
+058a e6 04		    AND 0x4 
+058c			     ; Loop until a key is pressed 
+058c 28 fa		    JR Z, EP_KBDOUT 
+058e 79			    LD A,C 
+058f d3 05		    OUT (io_05_keyboard_data),A 
+0591 c9			    RET 
+0592			 
+0592			translate_keyboard_in_a: 
+0592 21 a7 05		    LD HL,translate_keyboard_keys 
+0595 01 13 00		    LD BC,translate_keyboard_size 
+0598 ed b1		    CPIR 
+059a			    ; Key not found, return the key not translated 
+059a c0			    RET NZ 
+059b			    ; Key found, replace with the corresponding char 
+059b 11 a7 05		    LD DE,translate_keyboard_keys 
+059e b7			    OR A 
+059f ed 52		    SBC HL,DE 
+05a1 11 b9 05		    LD DE,translate_keyboard_values 
+05a4 19			    ADD HL,DE 
+05a5 7e			    LD A,(HL) 
+05a6 c9			    RET 
+05a7			translate_keyboard_size: EQU 0x13 
+05a7			translate_keyboard_keys: 
+05a7 f1 f2 f3 f4 b1 c0 c1 c2	    DB 0xF1, 0xF2, 0xF3, 0xF4, 0xB1, 0xC0, 0xC1, 0xC2 
+05af d0 d1 d2 e1 e2 e3 e4 d3	    DB 0xD0, 0xD1, 0xD2, 0xE1, 0xE2, 0xE3, 0xE4, 0xD3 
+05b7 c3 b2		    DB 0xC3, 0xB2 ; The 0xff from the values table is used as the last key 
+05b9			translate_keyboard_values: 
+05b9 ff 80 81 82 83 84 85 86	    DB 0xFF, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86 
+05c1 87 88 89 8a 8b 8c 8d 8e	    DB 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E 
+05c9 8f 90 91		    DB 0x8F, 0x90, 0x91 
+05cc			 
+05cc			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+05cc			; SERIAL 
+05cc			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+05cc			 
+05cc			EP_SIOSTI: 
+05cc			    ; return 0 or FF in A 
+05cc db 06		    IN A, (io_06_serial_control) 
+05ce e6 01		    AND 0x1 
+05d0 18 1c		    JR force_0_or_ff 
+05d2			 
+05d2			EP_SIOIN: 
+05d2			    ; return char in A 
+05d2 cd cc 05		    CALL EP_SIOSTI 
+05d5 28 fb		    JR Z, EP_SIOIN 
+05d7 db 04		    IN A, (io_04_serial_data) 
+05d9 c9			    RET 
+05da			 
+05da			EP_SIOOUT: 
+05da			    ; char in C 
+05da db 06		    IN A, (io_06_serial_control) 
+05dc e6 04		    AND 0x4 
+05de			    ; Loop until a byte is ready 
+05de 28 fa		    JR Z, EP_SIOOUT 
+05e0 79			    LD A,C 
+05e1 d3 04		    OUT (io_04_serial_data), A 
+05e3 c9			    RET 
+05e4			 
+05e4			EP_SERSTO: 
+05e4 db 06		    IN A, (io_06_serial_control) 
+05e6 e6 04		    AND 0x4 
+05e8 18 04		    JR force_0_or_ff 
+05ea			 
+05ea			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+05ea			; PARALLEL 
+05ea			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+05ea			 
+05ea			EP_LISTST: 
+05ea			    ; return 0 or FF in A 
+05ea db 1c		    IN A, (io_1c_system_bits) 
+05ec cb 5f		    BIT system_bit_centronicsReady, A 
+05ee			force_0_or_ff: 
+05ee c8			    RET Z 
+05ef 3e ff		    LD A,0xff 
+05f1 c9			    RET 
+05f2			 
+05f2			EP_LIST: 
+05f2			    ; char in C 
+05f2			    ; Loop until the printer is ready 
+05f2 cd ea 05		    CALL EP_LISTST 
+05f5 28 fb		    JR Z, EP_LIST 
+05f7			    ; Ouput the byte in C 
+05f7 79			    LD A,C 
+05f8 d3 08		    OUT (io_08_parallel_data), A 
+05fa			    ; Pulse the strobe signal 
+05fa db 1c		    IN A, (io_1c_system_bits) 
+05fc cb e7		    SET system_bit_centronicsStrobe, A 
+05fe d3 1c		    OUT (io_1c_system_bits), A 
+0600 cb a7		    RES system_bit_centronicsStrobe, A 
+0602 d3 1c		    OUT (io_1c_system_bits), A 
+0604 c9			    RET 
+0605			 
+0605			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0605			; CONSOLE OUTPUT 
+0605			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0605			 
+0605			EP_INITVID: 
+0605			    ; Clear stored ESC command argument 
+0605 3e 20		    LD A, ' ' 
+0607 32 6d fe		    LD (console_esc_equal_first_arg),A 
+060a			    ; clear screen and put the cursor at the top left 
+060a cd c4 06		    CALL console_clear_screen 
+060d 22 6e fe		    LD (console_cursor_position),HL 
+0610			    ; Disable esc mode 
+0610 af			    XOR A 
+0611 32 6c fe		    LD (console_esc_mode),A 
+0614			    ; ?? 
+0614 3e 17		    LD A,0x17 
+0616 d3 14		    OUT (io_14_scroll_register),A 
+0618			    ; Set ASCII mode 
+0618 3e 7f		    LD A,console_alphabet_ascii_mask 
+061a 32 70 fe		    LD (console_alphabet_mask),A 
+061d c9			    RET 
+061e			 
+061e			EP_VIDOUT: 
+061e			    ; char in C 
+061e			    ; Are we processing an escape sequence? 
+061e 3a 6c fe		    LD A, (console_esc_mode) 
+0621 b7			    OR A ; Clear carry 
+0622 c2 3b 07		    JP NZ, process_esc_command 
+0625			    ; Is it a BELL? 
+0625 3e 07		    LD A,0x7 ; ^G BELL 
+0627 b9			    CP C 
+0628 20 05		    JR NZ, EP_VIDOUT_cont 
+062a			    ; BELL sends a 4 to the keyboard to beep 
+062a 0e 04		    LD C,0x4 
+062c c3 88 05		    JP EP_KBDOUT 
+062f			EP_VIDOUT_cont: 
+062f cd 22 07		    CALL remove_blink_and_get_cursor_position 
+0632			    ; Push console_write_end to the stack to execute on any RET 
+0632 11 95 07		    LD DE, console_write_end 
+0635 d5			    PUSH DE 
+0636			    ; Test all special chars 
+0636 79			    LD A,C 
+0637 fe 0a		    CP 0xa 
+0639 28 64		    JR Z, console_line_feed 
+063b fe 0d		    CP 0xd 
+063d ca 30 07		    JP Z, console_carriage_return 
+0640 fe 08		    CP 0x8 
+0642 28 61		    JR Z, console_backspace 
+0644 fe 0c		    CP 0xc 
+0646 28 63		    JR Z, console_right 
+0648 fe 0b		    CP 0xb 
+064a 28 67		    JR Z, console_up 
+064c fe 1b		    CP 0x1b 
+064e ca 35 07		    JP Z, enable_esc_mode 
+0651 fe 18		    CP 0x18 
+0653 ca fd 06		    JP Z, console_erase_to_end_of_line 
+0656 fe 17		    CP 0x17 
+0658 28 7f		    JR Z,console_erase_to_end_of_screen 
+065a fe 1a		    CP 0x1a 
+065c 28 66		    JR Z,console_clear_screen 
+065e fe 1e		    CP 0x1e 
+0660 28 73		    JR Z,console_home_cursor 
+0662			    ; For lowercase chars we may apply a conversion to greek 
+0662			    ; letters.  
+0662 fe 60		    CP 'a'-1 
+0664 38 04		    JR C,skip_greek_conversion 
+0666			    ; Apply the alphabet mask 
+0666 3a 70 fe		    LD A,(console_alphabet_mask) 
+0669 a1			    AND C 
+066a			skip_greek_conversion: 
+066a			    ; Write the char at the cursor position 
+066a 77			    LD (HL),A 
+066b			    ; Advance the cursor 
+066b 23			    INC HL 
+066c 7d			    LD A,L 
+066d			    ; Return if we are not at the and of the line 
+066d e6 7f		    AND 0x7f 
+066f fe 50		    CP console_columns 
+0671 d8			    RET C 
+0672			    ; We are at the end of the line CR + LF 
+0672 cd 30 07		    CALL console_carriage_return 
+0675 18 28		    JR console_line_feed 
+0677			 
+0677			console_line_feed_cont: 
+0677			    ; Let's check if the cursor is past the end of the screen 
+0677 11 ff 3b		    LD DE, address_vram_end 
+067a 7a			    LD A,D 
+067b bc			    CP H 
+067c 38 04		    JR C,console_line_feed_scroll 
+067e c0			    RET NZ 
+067f 7b			    LD A,E 
+0680 bd			    CP L 
+0681 d0			    RET NC 
+0682			 
+0682			console_line_feed_scroll: 
+0682			    ; We are at the end of the screen, scroll the screen 
+0682			    ; Move all lines except the first up 
+0682 06 17		    LD B, console_lines - 1 
+0684			    ; Copy 80 chars from each line to the prev one 
+0684			    ; Starting by the second line 
+0684 21 80 30		    LD HL, address_vram + console_line_length 
+0687 11 00 30		    LD DE, address_vram 
+068a			console_line_feed_scroll_loop: 
+068a c5			    PUSH BC 
+068b			    ; Copy 80 chars 
+068b 01 50 00		    LD BC, console_columns 
+068e ed b0		    LDIR 
+0690			    ; Skip the 128 - 80 chars not used 
+0690 01 30 00		    LD BC,console_line_length - console_columns 
+0693 09			    ADD HL,BC 
+0694 eb			    EX DE,HL 
+0695 09			    ADD HL,BC 
+0696 eb			    EX DE,HL 
+0697 c1			    POP BC 
+0698			    ; Repeat for each line 
+0698 10 f0		    DJNZ console_line_feed_scroll_loop 
+069a			    ; Place the cursor at the bottom left 
+069a 21 80 3b		    LD HL, address_vram_start_of_last_line 
+069d 18 5e		    JR console_erase_to_end_of_line 
+069f			 
+069f			console_line_feed: 
+069f			    ; Advance the cursor to the next line 
+069f 11 80 00		    LD DE, console_line_length 
+06a2 19			    ADD HL,DE 
+06a3			    ; Scroll up if needed 
+06a3 18 d2		    JR console_line_feed_cont 
+06a5			 
+06a5			console_backspace: 
+06a5 7d			    LD A,L 
+06a6 e6 7f		    AND console_line_mask 
+06a8			    ; Ignore if we are already at the beginning of the line 
+06a8 c8			    RET Z 
+06a9			    ; Move the cursor to the previous char 
+06a9 2b			    DEC HL 
+06aa c9			    RET 
+06ab			 
+06ab			console_right: 
+06ab 7d			    LD A,L 
+06ac e6 7f		    AND console_line_mask 
+06ae			    ; Ignore if we are already at the end of the line 
+06ae fe 4f		    CP console_columns-1 
+06b0 d0			    RET NC 
+06b1			    ; Move the cursor to the next char 
+06b1 23			    INC HL 
+06b2 c9			    RET 
+06b3			 
+06b3			console_up: 
+06b3 e5			    PUSH HL 
+06b4			    ; Move one line up 
+06b4 11 80 ff		    LD DE, -console_line_length 
+06b7 19			    ADD HL,DE 
+06b8 e5			    PUSH HL 
+06b9			    ; Are we moved too far up? 
+06b9 b7			    OR A ; Clear carry 
+06ba 11 00 30		    LD DE,address_vram 
+06bd ed 52		    SBC HL,DE 
+06bf e1			    POP HL ; Updated position 
+06c0 d1			    POP DE ; Original position 
+06c1			    ; No, we re ok 
+06c1 d0			    RET NC 
+06c2			    ; Yes, restore the original position 
+06c2 eb			    EX DE,HL 
+06c3 c9			    RET 
+06c4			 
+06c4			console_clear_screen: 
+06c4			    ; Put a space at the beginning of the screen 
+06c4			    ; and for the rest of the screen, copy the previous char (a space) 
+06c4 21 00 30		    LD HL, address_vram 
+06c7 11 01 30		    LD DE, address_vram + 1 
+06ca 01 ff 0b		    LD BC, console_lines * console_line_length - 1 
+06cd 36 20		    LD (HL), ' ' 
+06cf ed b0		    LDIR 
+06d1			    ; Set the cursor to the beginning of the screen 
+06d1 21 00 30		    LD HL,address_vram 
+06d4 c9			    RET 
+06d5			 
+06d5			console_home_cursor: 
+06d5			    ; Set the cursor to the beginning of the screen 
+06d5 21 00 30		    LD HL,address_vram 
+06d8 c9			    RET 
+06d9			 
+06d9			console_erase_to_end_of_screen: 
+06d9 e5			    PUSH HL 
+06da cd fd 06		    CALL console_erase_to_end_of_line 
+06dd 11 80 00		    LD DE, console_line_length 
+06e0			    ; Move cursor to the beggining of the current line 
+06e0 7d			    LD A,L 
+06e1 e6 80		    AND console_line_length 
+06e3 6f			    LD L,A 
+06e4			    ; Move cursor the the next line 
+06e4 19			    ADD HL,DE 
+06e5			    ; Did we move past the end the the screen? 
+06e5 3e 3c		    LD A,0x3c ; MSB byte of the position past the end of the screen 
+06e7 bc			    CP H 
+06e8			    ; If yes, restore cursor and return 
+06e8 28 11		    JR Z,console_restore_cursor_position 
+06ea			    ; Write spaces until the end of the screen 
+06ea			    ; Set in CB the count of spaces to write 
+06ea 5d			    LD E,L 
+06eb 54			    LD D,H 
+06ec b7			    OR A ; Clear carry 
+06ed 21 ff 3b		    LD HL, address_vram_end 
+06f0 ed 52		    SBC HL,DE 
+06f2 4d			    LD C,L 
+06f3 44			    LD B,H 
+06f4			    ; Set DE as the next char 
+06f4 62			    LD H,D 
+06f5 6b			    LD L,E 
+06f6 13			    INC DE 
+06f7			    ; Fill with spaces copying the previous char until the end of the screen 
+06f7 36 20		    LD (HL), ' ' 
+06f9 ed b0		    LDIR 
+06fb			console_restore_cursor_position: 
+06fb e1			    POP HL 
+06fc c9			    RET 
+06fd			 
+06fd			console_erase_to_end_of_line: 
+06fd 7d			    LD A,L 
+06fe e6 7f		    AND console_line_mask 
+0700			    ; Are we at the last position of the line? 
+0700 fe 4f		    CP console_columns-1 
+0702			    ; No 
+0702 38 03		    JR C,console_erase_to_end_of_line_cont 
+0704			    ; Yes, write a space and return 
+0704 36 20		    LD (HL), ' ' 
+0706 c9			    RET 
+0707			console_erase_to_end_of_line_cont: 
+0707 e5			    PUSH HL 
+0708 e5			    PUSH HL 
+0709			    ; Move to the start of the line 
+0709 7d			    LD A,L 
+070a e6 80		    AND console_line_length 
+070c 6f			    LD L,A 
+070d			    ; Move to the end of the line 
+070d 11 4f 00		    LD DE, console_columns - 1 
+0710 19			    ADD HL,DE 
+0711 d1			    POP DE ; Original position 
+0712 d5			    PUSH DE 
+0713			    ; Set CB to the count of spaces to write from cursor to the end of the line 
+0713 b7			    OR A ; Clear carry 
+0714 ed 52		    SBC HL,DE 
+0716 4d			    LD C,L 
+0717 44			    LD B,H 
+0718			    ; Set DE as the next char 
+0718 e1			    POP HL 
+0719 5d			    LD E,L 
+071a 54			    LD D,H 
+071b 13			    INC DE 
+071c			    ; Fill with spaces copying the previous char until the end of the line 
+071c 36 20		    LD (HL), ' ' 
+071e ed b0		    LDIR 
+0720 e1			    POP HL 
+0721 c9			    RET 
+0722			 
+0722			remove_blink_and_get_cursor_position: 
+0722			    ; Get the cursor position 
+0722 2a 6e fe		    LD HL,(console_cursor_position) 
+0725 7e			    LD A,(HL) 
+0726			    ; Is the char at the cursor a blinking '_' 
+0726 fe df		    CP '_' + 0x80 
+0728 3e 20		    LD A, ' ' 
+072a			    ; No, continue 
+072a 20 01		    JR NZ,remove_blink_and_get_cursor_position_cont 
+072c			    ; Yes, put back a space 
+072c 77			    LD (HL),A 
+072d			remove_blink_and_get_cursor_position_cont: 
+072d			    ; Remove the blink bit 
+072d cb be		    RES 0x7,(HL) 
+072f c9			    RET 
+0730			 
+0730			console_carriage_return: 
+0730			    ; Set column to 0 by clearing the 7 LS bits on the cursor position 
+0730 7d			    LD A,L 
+0731 e6 80		    AND console_line_length 
+0733 6f			    LD L,A 
+0734 c9			    RET 
+0735			 
+0735			enable_esc_mode: 
+0735			    ; Enable esc mode, next char will be an ESC command 
+0735 3e 01		    LD A,console_esc_mode_enabled 
+0737 32 6c fe		    LD (console_esc_mode),A 
+073a c9			    RET 
+073b			 
+073b			process_esc_command: 
+073b			    ; A has the esc mode 
+073b			    ; C has the char to process 
+073b			    ; Push the location of a RET on the stack. A RET will be another RET? 
+073b 21 a2 07		    LD HL, ret_opcode_address 
+073e e5			    PUSH HL 
+073f			    ; Reset ESC mode 
+073f 21 6c fe		    LD HL,console_esc_mode 
+0742 36 00		    LD (HL), console_esc_mode_clear 
+0744			    ; Are we in a n ESC mode past ebaled? 
+0744 fe 01		    CP console_esc_mode_enabled 
+0746			    ; Yes, process esc argument 
+0746 20 19		    JR NZ,process_esc_arg_1 
+0748			    ; No, process the command 
+0748			    ; Load the char in A with the upper bit cleared (no blink) 
+0748 79			    LD A,C 
+0749 cb bf		    RES 0x7,A 
+074b fe 47		    CP 'G' 
+074d 28 54		    JR Z, esc_set_greek_mode 
+074f fe 41		    CP 'A' 
+0751 28 56		    JR Z,esc_set_ascii_mode 
+0753 fe 52		    CP 'R' 
+0755 28 58		    JR Z,esc_line_delete 
+0757 fe 45		    CP 'E' 
+0759 28 66		    JR Z,esc_line_insert 
+075b fe 3d		    CP '=' 
+075d			    ;  Not a known ESC command, we ignore the char and return 
+075d c0			    RET NZ 
+075e			    ; Command is '=', we set that mode 
+075e 36 02		    LD (HL),console_esc_mode_arg_1 
+0760 c9			    RET 
+0761			 
+0761			process_esc_arg_1: 
+0761			    ; Are we in an ESC mode past arg_1 
+0761 fe 02		    CP console_esc_mode_arg_1 
+0763			    ; Yes 
+0763 20 07		    JR NZ,process_esc_arg_2 
+0765			    ; No, store the first argmument and return 
+0765 79			    LD A,C 
+0766 32 6d fe		    LD (console_esc_equal_first_arg),A 
+0769 36 03		    LD (HL),console_esc_mode_arg_2 
+076b c9			    RET 
+076c			 
+076c			process_esc_arg_2: 
+076c			    ; Are we in an ESC mode past arg_2 
+076c fe 03		    CP console_esc_mode_arg_2 
+076e			    ; Yes, just return 
+076e c0			    RET NZ 
+076f cd 22 07		    CALL remove_blink_and_get_cursor_position 
+0772 e1			    POP HL 
+0773			    ; Put the cursor at the top right corner 
+0773 21 00 30		    LD HL,address_vram 
+0776			    ; Second arg is column + 0x20 
+0776 79			    LD A,C 
+0777 d6 20		    SUB 0x20 
+0779			    ; Get the modulo 80 
+0779			esc_arg_2_mod_80_loop: 
+0779 d6 50		    SUB console_columns 
+077b 30 fc		    JR NC,esc_arg_2_mod_80_loop 
+077d c6 50		    ADD A,console_columns 
+077f			    ; Advance to te arg_2 column 
+077f 6f			    LD L,A 
+0780			    ; First arg is row + 0x20 
+0780 3a 6d fe		    LD A,(console_esc_equal_first_arg) 
+0783 d6 20		    SUB 0x20 
+0785			    ; Get the modulo 24 
+0785			esc_arg_2_mod_24_loop: 
+0785 d6 18		    SUB console_lines 
+0787 30 fc		    JR NC,esc_arg_2_mod_24_loop 
+0789 c6 18		    ADD A,console_lines 
+078b			    ; Advance to the arg_1 row by advancing a line per row 
+078b 11 80 00		    LD DE,console_line_length 
+078e			move_down_loop: 
+078e ca 95 07		    JP Z,console_write_end 
+0791 19			    ADD HL,DE 
+0792 3d			    DEC A 
+0793 18 f9		    JR move_down_loop 
+0795			 
+0795			console_write_end: 
+0795			    ; Finish the console_write and enable blink at the cursor position 
+0795			    ; HL has the cursor position 
+0795			    ; Get the char under the cursos 
+0795 7e			    LD A,(HL) 
+0796			    ; If it is a space, we write a blinking '_' 
+0796 fe 20		    CP 0x20 
+0798 20 02		    JR NZ, console_write_end_cont 
+079a 3e df		    LD A,'_' + 0x80 
+079c			console_write_end_cont: 
+079c			    ; Set the upper bit of the char to blink 
+079c cb ff		    SET 0x7,A 
+079e 77			    LD (HL),A 
+079f			    ; Store the cursor position 
+079f 22 6e fe		    LD (console_cursor_position),HL 
+07a2			ret_opcode_address: 
+07a2 c9			    RET 
+07a3			 
+07a3			esc_set_greek_mode: 
+07a3			    ; Store the mask for chars to write 
+07a3			    ; For greek chars, we map to 0 to 0x1f 
+07a3 3e 1f		    LD A,console_alphabet_greek_mask 
+07a5 32 70 fe		    LD (console_alphabet_mask),A 
+07a8 c9			    RET 
+07a9			 
+07a9			esc_set_ascii_mode: 
+07a9			    ; Store the mask for chars to write 
+07a9			    ; For ASCII, we just remove the blink bit 
+07a9 3e 7f		    LD A,console_alphabet_ascii_mask 
+07ab 32 70 fe		    LD (console_alphabet_mask),A 
+07ae c9			    RET 
+07af			 
+07af			esc_line_delete: 
+07af e1			    POP HL 
+07b0			    ; Prepare HL, DE, BC and the Z flag 
+07b0 cd d8 07		    CALL esc_line_insert_or_delete_prepare 
+07b3 d5			    PUSH DE 
+07b4			    ; Skip copy if there is nothing to copy 
+07b4 28 02		    JR Z,esc_line_delete_end 
+07b6 ed b0		    LDIR 
+07b8			esc_line_delete_end: 
+07b8			    ; Delete the last line, it is always empty after a line delete 
+07b8 21 80 3b		    LD HL, address_vram_start_of_last_line 
+07bb cd fd 06		    CALL console_erase_to_end_of_line 
+07be			    ; Set the cursor to it's original position 
+07be e1			    POP HL 
+07bf			    ; Done 
+07bf 18 d4		    JR console_write_end 
+07c1			 
+07c1			esc_line_insert: 
+07c1 e1			    POP HL 
+07c2			    ; Prepare HL, DE, BC and the Z flag 
+07c2 cd d8 07		    CALL esc_line_insert_or_delete_prepare 
+07c5 d5			    PUSH DE 
+07c6			    ; Skip copy if there is nothing to copy 
+07c6 28 08		    JR Z,esc_line_insert_end 
+07c8			    ; Copy lines down up to the cursor line 
+07c8 11 ff 3b		    LD DE, address_vram_end 
+07cb 21 7f 3b		    LD HL, address_vram_start_of_last_line - 1 
+07ce ed b8		    LDDR 
+07d0			esc_line_insert_end: 
+07d0			    ; Delete the line as we insert a blank line 
+07d0 e1			    POP HL 
+07d1 e5			    PUSH HL 
+07d2 cd fd 06		    CALL console_erase_to_end_of_line 
+07d5			    ; Set the cursor to the start of the line 
+07d5 e1			    POP HL 
+07d6			    ; Done 
+07d6 18 bd		    JR console_write_end 
+07d8			 
+07d8			esc_line_insert_or_delete_prepare: 
+07d8 cd 22 07		    CALL remove_blink_and_get_cursor_position 
+07db cd 30 07		    CALL console_carriage_return 
+07de e5			    PUSH HL 
+07df eb			    EX DE,HL 
+07e0			    ; Position of the bottom left 
+07e0 21 80 3b		    LD HL, address_vram_start_of_last_line 
+07e3			    ; Set BC to the count of bytes until the end of the screen minus one line 
+07e3 b7			    OR A ; Clear carry 
+07e4 ed 52		    SBC HL,DE 
+07e6 44			    LD B,H 
+07e7 4d			    LD C,L 
+07e8			    ; Set HL to the start of the next line 
+07e8 e1			    POP HL 
+07e9 e5			    PUSH HL 
+07ea 11 80 00		    LD DE,console_line_length 
+07ed 19			    ADD HL,DE 
+07ee			    ; Set DE to the start of the current line 
+07ee d1			    POP DE 
+07ef			    ; Set Z flag if BC is zero. To be used later. 
+07ef 78			    LD A,B 
+07f0 b1			    OR C 
+07f1			    ; Back to insert or delete line 
+07f1 c9			    RET 
+07f2			 
+07f2			console_write_string: 
+07f2			    ; Get return address from the stack 
+07f2 e3			    EX (SP),HL 
+07f3			    ; Read the char pointed there 
+07f3 7e			    LD A,(HL) 
+07f4			    ; Increment by one the return address in the stack 
+07f4 23			    INC HL 
+07f5 e3			    EX (SP),HL 
+07f6			    ; If the char is a zero, we are done with the string and can 
+07f6			    ; return to the caller on the address past the string 
+07f6 b7			    OR A 
+07f7 c8			    RET Z 
+07f8			    ; Write the char and continue with the string 
+07f8 4f			    LD C,A 
+07f9 cd 1e 06		    CALL EP_VIDOUT 
+07fc 18 f4		    JR console_write_string 
+07fe			 
+07fe			filler: 
+07fe ff 00		    DB 0xff, 0x00 
+0800			 
+# End of file 81-149c.s
+0800
