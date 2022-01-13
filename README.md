@@ -1,4 +1,4 @@
-# Kaypro ROM disassembled and commented
+# Kaypro disassembled and commented
 
 ## Elements analysed
 
@@ -16,6 +16,17 @@ Executables
 
 - [cambio.com](executable/cambio.s): Privided by the CP/M in Spanish to select how the BIOS behaves
 - [cambio8.com](executable/cambio8.s): Privided by the CP/M in Spanish to select how the BIOS behaves
+
+Character generators
+
+- 81-146a: Kapyro II/83, downloaded from [Retroarchive](http://www.retroarchive.org/maslin/disks/roms/index.html)
+- 81-234: Kaypro II/83 International version, dumped from my Kaypro with Spanish keyboard. Replaces the Greek chars with the extra European latin chars
+- 81-187: Kaypro 10, higher resolution
+- 81-235: Kaypro 2/84, higher resolution, identical to 81-187
+
+![81-234 character generator](81-234.png)
+
+
 
 ## References
 
