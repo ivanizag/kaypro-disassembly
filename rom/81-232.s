@@ -22,12 +22,12 @@
 ; system bit 2 is used to select single side or double side mode.
 ;
 ;   On the ROM 81.149c, the current track of both drives is stored
-; on two variables. Also, the densite detected for the current disk
+; on two variables. Also, the density detected for the current disk
 ; on each drive is stored as an aditional 16th byte of the disk
 ; parameter header. On this ROM, there is a need to store as well if
 ; the disk is double sided. Current track, density and sides are now
 ; stored per drive in the variables disk_active_info_drive_a and
-; disk_active_info_drive_b. It is copied bach an forth to
+; disk_active_info_drive_b. It is copied back an forth to
 ; disk_active_info as A: or B: is selected. 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

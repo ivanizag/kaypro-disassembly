@@ -5,23 +5,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; NOTES:
-;
-;   From the code it looks like there is support for single density
-; and double density disks. FM or MFM encoding respectively.
-;   The entrypoints interface show sectors as having 128 bytes.
-;   For single density the sector size is 128 bytes. The code can go
-; directly to the fdc (floppy disk controller, a WD MD1793).
-;   For double density the sector size is 512 bytes. To simulate the
-; smaller sectors the code reads 512 bytes in a buffer and copies
-; the relevant 128 bytes. To do so, the code is much more complex as
-; commands can't be sent directly to the fdc.
-;   Surprsingly, it looks like there was not a Kaypro ever sold with
-; single density disks. 
-;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; CONSTANTS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

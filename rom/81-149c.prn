@@ -6,23 +6,6 @@
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-0000			; NOTES: 
-0000			; 
-0000			;   From the code it looks like there is support for single density 
-0000			; and double density disks. FM or MFM encoding respectively. 
-0000			;   The entrypoints interface show sectors as having 128 bytes. 
-0000			;   For single density the sector size is 128 bytes. The code can go 
-0000			; directly to the fdc (floppy disk controller, a WD MD1793). 
-0000			;   For double density the sector size is 512 bytes. To simulate the 
-0000			; smaller sectors the code reads 512 bytes in a buffer and copies 
-0000			; the relevant 128 bytes. To do so, the code is much more complex as 
-0000			; commands can't be sent directly to the fdc. 
-0000			;   Surprsingly, it looks like there was not a Kaypro ever sold with 
-0000			; single density disks.  
-0000			; 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-0000			 
-0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; CONSTANTS 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			 
