@@ -24,7 +24,7 @@ Character generators
 - 81-187: Kaypro 10, higher resolution
 - 81-235: Kaypro 2/84, higher resolution, identical to 81-187
 
-![81-234 character generator](81-234.png)
+![81-234 character generator](chars/81-234.png)
 
 
 
