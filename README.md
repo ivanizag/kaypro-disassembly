@@ -14,8 +14,8 @@
 
 [Executables](executables)
 
-- [cambio.com](executable/cambio.s): Privided by the CP/M in Spanish to select how the BIOS behaves
-- [cambio8.com](executable/cambio8.s): Privided by the CP/M in Spanish to select how the BIOS behaves
+- [cambio.com](executable/cambio.s): Provided by the CP/M in Spanish to select how the BIOS behaves
+- [cambio8.com](executable/cambio8.s): Provided by the CP/M in Spanish to select how the BIOS behaves
 
 [Character generators](chars)
 
