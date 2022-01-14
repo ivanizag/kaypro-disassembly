@@ -4,18 +4,18 @@
 
 [ROMS](rom):
 
-- [81-149c](81-149c.s), downloaded from [Retroarchive](http://www.retroarchive.org/maslin/disks/roms/index.html)
-- [81-232](81-232.s), dumped from my Kaypro
+- [81-149c](rom/81-149c.s), downloaded from [Retroarchive](http://www.retroarchive.org/maslin/disks/roms/index.html)
+- [81-232](rom/81-232.s), dumped from my Kaypro
 
 [CP/M BIOS](bios):
 
-- [CP/M 2.2 US](bios/bios_us.us)
+- [CP/M 2.2 US](bios/bios_us.s)
 - CP/M 2.2 Spanish (Work in progress): Has translated versions of the warm boot message and does the character translation for the Spanish keyboard
 
 [Executables](executables)
 
-- [cambio.com](executable/cambio.s): Provided by the CP/M in Spanish to select how the BIOS behaves
-- [cambio8.com](executable/cambio8.s): Provided by the CP/M in Spanish to select how the BIOS behaves
+- [cambio.com](executables/cambio.s): Provided by the CP/M in Spanish to select how the BIOS behaves
+- [cambio8.com](executables/cambio8.s): Provided by the CP/M in Spanish to select how the BIOS behaves
 
 [Character generators](chars)
 
