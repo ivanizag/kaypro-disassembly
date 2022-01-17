@@ -10,7 +10,7 @@
 [CP/M BIOS](bios):
 
 - [CP/M 2.2 US](bios/bios_us.s)
-- CP/M 2.2 Spanish (Work in progress): Has translated versions of the warm boot message and does the character translation for the Spanish keyboard
+- [CP/M 2.2 Spanish](bios/bios_es.s): Has translated versions of the warm boot message and does the character translation for the Spanish keyboard
 
 [Executables](executables)
 

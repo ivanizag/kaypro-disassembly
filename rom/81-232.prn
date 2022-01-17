@@ -1540,19 +1540,24 @@
 062e 11 3a 06		    LD DE,translate_keyboard_keys 
 0631 b7			    OR A 
 0632 ed 52		    SBC HL,DE 
-0634 11 4c 06		    LD DE,translate_keyboard_values 
+0634 11 4c 06		    LD DE,translate_keyboard_values-1 
 0637 19			    ADD HL,DE 
 0638 7e			    LD A,(HL) 
 0639 c9			    RET 
 063a			translate_keyboard_size: EQU 0x13 
 063a			translate_keyboard_keys: 
-063a f1 f2 f3 f4 b1 c0 c1 c2	    DB 0xF1, 0xF2, 0xF3, 0xF4, 0xB1, 0xC0, 0xC1, 0xC2 
-0642 d0 d1 d2 e1 e2 e3 e4 d3	    DB 0xD0, 0xD1, 0xD2, 0xE1, 0xE2, 0xE3, 0xE4, 0xD3 
-064a c3 b2		    DB 0xC3, 0xB2 ; The 0xff from the values table is used as the last key 
-064c			translate_keyboard_values: 
-064c ff 80 81 82 83 84 85 86	    DB 0xFF, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86 
-0654 87 88 89 8a 8b 8c 8d 8e	    DB 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E 
-065c 8f 90 91		    DB 0x8F, 0x90, 0x91 
+063a f1 f2 f3 f4	    DB 0xF1, 0xF2, 0xF3, 0xF4 ; Arrow keys 
+063e b1 c0 c1 c2	    DB 0xB1, 0xC0, 0xC1, 0xC2 ; Numerical keypad 
+0642 d0 d1 d2 e1	    DB 0xD0, 0xD1, 0xD2, 0xE1 
+0646 e2 e3 e4 d3	    DB 0xE2, 0xE3, 0xE4, 0xD3 
+064a c3 b2		    DB 0xC3, 0xB2 
+064c ff			    DB 0xFF 
+064d			translate_keyboard_values: 
+064d 80 81 82 83	    DB 0x80, 0x81, 0x82, 0x83 ; Arrow keys 
+0651 84 85 86 87	    DB 0x84, 0x85, 0x86, 0x87 ; Numerical keypad 
+0655 88 89 8a 8b	    DB 0x88, 0x89, 0x8A, 0x8B 
+0659 8c 8d 8e 8f	    DB 0x8C, 0x8D, 0x8E, 0x8F 
+065d 90 91		    DB 0x90, 0x91 
 065f			 
 065f			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 065f			; SERIAL 

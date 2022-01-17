@@ -10,13 +10,9 @@ system_bit_bank:              EQU 7
 
 reset:                      EQU 0x0000
 iobyte:                     EQU 0x0003
-iobyte_console_mask:          EQU 0x03
-iobyte_list_mask:             EQU 0xc0
-iobyte_list_CRT:              EQU 0x40
-iobyte_list_PRT:              EQU 0x80
 user_drive:                 EQU 0x0004
 bdos_ep:                    EQU 0x0005
-ccp:                        EQU 0xe400
+cpm_boot:                   EQU 0xe400
 bdos_entrypoint:            EQU 0xec06
 rom_stack:                  EQU 0xfc00
 disk_DMA_address:           EQU 0xfc14 ; 2 bytes
@@ -46,6 +42,20 @@ ROM_LIST:      EQU 0x3f
 ROM_SERSTO:    EQU 0x42
 ROM_VIDOUT:    EQU 0x45
 
+; IOBYTE Mappings:
+;
+; Bits      Bits 6,7    Bits 4,5    Bits 2,3    Bits 0,1
+; Device    LIST        PUNCH       READER      CONSOLE
+;
+; Value
+;   00      TTY:        TTY:        TTY:        TTY:
+;   01      CRT:        PTP:        PTR:        CRT:
+;   10      LPT:        UP1:        UR1:        BAT:
+;   11      UL1:        UP2:        UR2:        UC1:
+iobyte_console_mask:          EQU 0x03
+iobyte_list_mask:             EQU 0xc0
+iobyte_list_CRT:              EQU 0x40
+iobyte_list_PRT:              EQU 0x80
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; BIOS ENTRY POINTS
@@ -71,12 +81,20 @@ EP_WBOOT:
     JP LISTST
     JP SECTRAN
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; BIOS CONFIGURATION
+;
+; Using CONFIG.COM
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 iobyte_default:
     DB 81h ; Console to CRT and List to parallel port
 bios_config:
     DB 00h
-control_char_conversion:
+key_maps:
+arrow_key_map: ; Mapping for the arrow keys
     DB 0Bh, 0Ah, 08h, 0Ch
+keypad_map: ; Mapping for the keypad
     DB "0123"
     DB "4567"
     DB "89-,"
@@ -87,7 +105,6 @@ baud_rate_default:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; BOOT
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 
 BOOT:
     CALL INITDSK
@@ -112,10 +129,10 @@ BOOT_SILENT:
     LD HL, bdos_entrypoint
     LD (bdos_ep), A
     LD (bdos_ep+1), HL
-    ; Continue boot to CCP
+    ; Continue boot to CP/M
     LD A, (user_drive)
     LD C, A
-    JP ccp
+    JP cpm_boot
 
 WBOOT:
     CALL INITDSK
@@ -130,8 +147,8 @@ WBOOT_SILENT:
     CALL SELDSK
     LD BC, 0x0
     CALL SETTRK
-    ; Set DMA address to where CCP is
-    LD HL, ccp
+    ; Set DMA address to where CP/M must be is
+    LD HL, cpm_boot
     LD (disk_DMA_address), HL
     ; Read 44 sectors, start on sector 1
     LD BC, 0x2c01
@@ -154,7 +171,7 @@ WBOOT_LOOP:
     LD (ram_e407), A
     ; Are we done?
     DEC B
-    ; Yes, exec CCP
+    ; Yes, boot CP/M
     JP Z, BOOT_SILENT
     ; No, next sector
     INC C
@@ -200,10 +217,13 @@ CONIN:
     CALL ROM_JUMP
     ; Process the keyboard output
     OR A
-    RET P ;??
-    AND 0x1f ; control char conversion table is smaller than 32!!
-    ; Translate the control chars
-    LD HL, control_char_conversion
+    ; If < 0x80, return it
+    RET P
+    ; Let's check the config to map the arrow keys and the numeric keypad
+    ; The ROM returns 80-83 for the arrows and 84-91 for the keypad
+    ; Apply the mapping
+    AND 0x1f
+    LD HL, key_maps
     LD C, A
     LD B, 0x0
     ADD HL, BC
@@ -352,7 +372,7 @@ ROM_JUMP_CLEANUP:
     RET
 
 WRITE_STRING_INLINE:
-    ; Retrieve the char at the return address
+    ; Retrieve the char at the return address in the stack
     EX (SP), HL
     LD A, (HL)
     ; Increase the return address

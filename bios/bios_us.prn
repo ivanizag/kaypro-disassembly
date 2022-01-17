@@ -11,13 +11,9 @@
 0000			 
 0000			reset:                      EQU 0x0000 
 0000			iobyte:                     EQU 0x0003 
-0000			iobyte_console_mask:          EQU 0x03 
-0000			iobyte_list_mask:             EQU 0xc0 
-0000			iobyte_list_CRT:              EQU 0x40 
-0000			iobyte_list_PRT:              EQU 0x80 
 0000			user_drive:                 EQU 0x0004 
 0000			bdos_ep:                    EQU 0x0005 
-0000			ccp:                        EQU 0xe400 
+0000			cpm_boot:                   EQU 0xe400 
 0000			bdos_entrypoint:            EQU 0xec06 
 0000			rom_stack:                  EQU 0xfc00 
 0000			disk_DMA_address:           EQU 0xfc14 ; 2 bytes 
@@ -47,6 +43,20 @@
 0000			ROM_SERSTO:    EQU 0x42 
 0000			ROM_VIDOUT:    EQU 0x45 
 0000			 
+0000			; IOBYTE Mappings: 
+0000			; 
+0000			; Bits      Bits 6,7    Bits 4,5    Bits 2,3    Bits 0,1 
+0000			; Device    LIST        PUNCH       READER      CONSOLE 
+0000			; 
+0000			; Value 
+0000			;   00      TTY:        TTY:        TTY:        TTY: 
+0000			;   01      CRT:        PTP:        PTR:        CRT: 
+0000			;   10      LPT:        UP1:        UR1:        BAT: 
+0000			;   11      UL1:        UP2:        UR2:        UC1: 
+0000			iobyte_console_mask:          EQU 0x03 
+0000			iobyte_list_mask:             EQU 0xc0 
+0000			iobyte_list_CRT:              EQU 0x40 
+0000			iobyte_list_PRT:              EQU 0x80 
 0000			 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; BIOS ENTRY POINTS 
@@ -72,12 +82,20 @@ fa2a c3 98 fb		    JP WRITE
 fa2d c3 65 fb		    JP LISTST 
 fa30 c3 a8 fb		    JP SECTRAN 
 fa33			 
+fa33			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+fa33			; BIOS CONFIGURATION 
+fa33			; 
+fa33			; Using CONFIG.COM 
+fa33			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+fa33			 
 fa33			iobyte_default: 
 fa33 81			    DB 81h ; Console to CRT and List to parallel port 
 fa34			bios_config: 
 fa34 00			    DB 00h 
-fa35			control_char_conversion: 
+fa35			key_maps: 
+fa35			arrow_key_map: ; Mapping for the arrow keys 
 fa35 0b 0a 08 0c	    DB 0Bh, 0Ah, 08h, 0Ch 
+fa39			keypad_map: ; Mapping for the keypad 
 fa39 ..			    DB "0123" 
 fa3d ..			    DB "4567" 
 fa41 ..			    DB "89-," 
@@ -88,7 +106,6 @@ fa48
 fa48			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 fa48			; BOOT 
 fa48			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-fa48			 
 fa48			 
 fa48			BOOT: 
 fa48 cd 78 fb		    CALL INITDSK 
@@ -113,10 +130,10 @@ fa89			    ; Set BDOS entry point at address 5
 fa89 21 06 ec		    LD HL, bdos_entrypoint 
 fa8c 32 05 00		    LD (bdos_ep), A 
 fa8f 22 06 00		    LD (bdos_ep+1), HL 
-fa92			    ; Continue boot to CCP 
+fa92			    ; Continue boot to CP/M 
 fa92 3a 04 00		    LD A, (user_drive) 
 fa95 4f			    LD C, A 
-fa96 c3 00 e4		    JP ccp 
+fa96 c3 00 e4		    JP cpm_boot 
 fa99			 
 fa99			WBOOT: 
 fa99 cd 78 fb		    CALL INITDSK 
@@ -131,8 +148,8 @@ fab0 0e 00		    LD C, 0x0
 fab2 cd 80 fb		    CALL SELDSK 
 fab5 01 00 00		    LD BC, 0x0 
 fab8 cd 84 fb		    CALL SETTRK 
-fabb			    ; Set DMA address to where CCP is 
-fabb 21 00 e4		    LD HL, ccp 
+fabb			    ; Set DMA address to where CP/M must be is 
+fabb 21 00 e4		    LD HL, cpm_boot 
 fabe 22 14 fc		    LD (disk_DMA_address), HL 
 fac1			    ; Read 44 sectors, start on sector 1 
 fac1 01 01 2c		    LD BC, 0x2c01 
@@ -155,7 +172,7 @@ fad9 af			    XOR A
 fada 32 07 e4		    LD (ram_e407), A 
 fadd			    ; Are we done? 
 fadd 05			    DEC B 
-fade			    ; Yes, exec CCP 
+fade			    ; Yes, boot CP/M 
 fade ca 7e fa		    JP Z, BOOT_SILENT 
 fae1			    ; No, next sector 
 fae1 0c			    INC C 
@@ -201,10 +218,13 @@ fb16 2e 2d		    LD L, ROM_KBDIN
 fb18 cd ac fb		    CALL ROM_JUMP 
 fb1b			    ; Process the keyboard output 
 fb1b b7			    OR A 
-fb1c f0			    RET P ;?? 
-fb1d e6 1f		    AND 0x1f ; control char conversion table is smaller than 32!! 
-fb1f			    ; Translate the control chars 
-fb1f 21 35 fa		    LD HL, control_char_conversion 
+fb1c			    ; If < 0x80, return it 
+fb1c f0			    RET P 
+fb1d			    ; Let's check the config to map the arrow keys and the numeric keypad 
+fb1d			    ; The ROM returns 80-83 for the arrows and 84-91 for the keypad 
+fb1d			    ; Apply the mapping 
+fb1d e6 1f		    AND 0x1f 
+fb1f 21 35 fa		    LD HL, key_maps 
 fb22 4f			    LD C, A 
 fb23 06 00		    LD B, 0x0 
 fb25 09			    ADD HL, BC 
@@ -353,7 +373,7 @@ fbce			    ; Return to the caller
 fbce c9			    RET 
 fbcf			 
 fbcf			WRITE_STRING_INLINE: 
-fbcf			    ; Retrieve the char at the return address 
+fbcf			    ; Retrieve the char at the return address in the stack 
 fbcf e3			    EX (SP), HL 
 fbd0 7e			    LD A, (HL) 
 fbd1			    ; Increase the return address 
