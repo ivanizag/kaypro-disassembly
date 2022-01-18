@@ -31,10 +31,18 @@ pending_accent_acute:       EQU 1
 pending_accent_grave:       EQU 2
 
 ; Bits used on the BIOS_CONFIG
-bios_config_1:              EQU 0 ; To force disk writes to be "directory write"
+bios_config_1:              EQU 0
+    ; 0: disk write mode as requested
+    ; 1: disk writes to be "directory write"
 bios_config_5:              EQU 5 ; Modified when using CAMBIO.COM
+    ; 0: "caracteres españoles (EUR/USASCII)"
+    ; 1: "caracteres europeos (E-ASCII)"
 bios_config_6:              EQU 6 ; Modified when using CAMBIO8.COM: 7 or 8 bits mode
-bios_config_7:              EQU 7 ; To skip the arrows and keypad mappings
+    ; 0: 7 bits mode
+    ; 1: 8 bits mode
+bios_config_7:              EQU 7
+    ; 0: do the arrows and keypad mappings as set in CONFIG.COM
+    ; 1: skip the arrows and keypad mappings
 
 ROM_INITDSK:   EQU 0x03
 ROM_HOME:      EQU 0x0c
