@@ -1,0 +1,12 @@
+cd bios
+./verify.sh bios_es.s
+./verify.sh bios_us.s
+cd ..
+cd rom
+./verify.sh 81-149c.s
+./verify.sh 81-232.s
+cd ..
+cd executables
+./verify.sh cambio.s
+./verify.sh cambio8.s
+cd ..
