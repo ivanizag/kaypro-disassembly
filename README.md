@@ -11,7 +11,7 @@
 
 - [CP/M 2.2 for ROM 81-149](bios/bios_22.s) `KAYPRO II 64k CP/M vers 2.2` From [kpii-149 in retroarchive](http://www.retroarchive.org/maslin/disks/kaypro/kpii-149.td0). Identical to CP/M 2.2 for ROM 81-232A (kpro-ii.td0).
 - [CP/M 2.2 Spanish for ROM 81-232](bios/bios_22sp.s) `KAYPRO CP/M 2.2 {SPv2.72}` From my collection. Has translated versions of the warm boot message and does the character translation for the Spanish keyboard
-- [CP/M 2.2 German for ROM 81-232](bios/bios_22sp.s) `KAYPRO CP/M 2.2 {GMv2.72}` From (kayiiger in in z80.eu)[http://www.z80.eu/downloads/KayIIger.zip]. Has translated versions of the warm boot message and does the character translation for the German keyboard
+- [CP/M 2.2 German for ROM 81-232](bios/bios_22sp.s) `KAYPRO CP/M 2.2 {GMv2.72}` From [kayiiger in in z80.eu](http://www.z80.eu/downloads/KayIIger.zip). Has translated versions of the warm boot message and does the character translation for the German keyboard
 
 [Executables](executables)
 
