@@ -1,0 +1,974 @@
+# File bios_22de.s
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; CP/M BIOS for the KAYPRO CP/M 2.2 {SPv2.72} 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; CONSTANTS 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			 
+0000			io_00_serial_baud_rate:     EQU 0x00 
+0000			io_07_keyboard_control:     EQU 0x07 
+0000			io_1c_system_bits:          EQU 0x1c 
+0000			system_bit_motors_neg:        EQU 6 
+0000			system_bit_bank:              EQU 7 
+0000			 
+0000			reset:                      EQU 0x0000 
+0000			iobyte:                     EQU 0x0003 
+0000			user_drive:                 EQU 0x0004 
+0000			bdos_ep:                    EQU 0x0005 
+0000			cpm_boot:                   EQU 0xe000 
+0000			cpm_warm_boot:              EQU 0xe003 
+0000			bdos_entrypoint:            EQU 0xe806 
+0000			 
+0000			sector_size:                EQU 128 
+0000			sectors_per_track:          EQU 40 
+0000			; See CP/M 2.2 System alteration guide appendix G 
+0000			rw_type_directory_write:    EQU 1 
+0000			 
+0000			; Values for PENDING_ACCENT 
+0000			pending_accent_none:        EQU 0 
+0000			pending_accent_acute:       EQU 1 
+0000			pending_accent_grave:       EQU 2 
+0000			 
+0000			; Bits used on the BIOS_CONFIG 
+0000			bios_config_1:              EQU 0 
+0000			    ; 0: disk write mode as requested 
+0000			    ; 1: disk writes to be "directory write" 
+0000			bios_config_5:              EQU 5 ; Modified when using CAMBIO.COM 
+0000			    ; 0: "caracteres españoles (EUR/USASCII)" 
+0000			    ; 1: "caracteres europeos (E-ASCII)" 
+0000			bios_config_6:              EQU 6 ; Modified when using CAMBIO8.COM: 7 or 8 bits mode 
+0000			    ; 0: 7 bits mode 
+0000			    ; 1: 8 bits mode 
+0000			bios_config_7:              EQU 7 
+0000			    ; 0: do the arrows and keypad mappings as set in CONFIG.COM 
+0000			    ; 1: skip the arrows and keypad mappings 
+0000			 
+0000			ROM_INITDSK:   EQU 0x03 
+0000			ROM_HOME:      EQU 0x0c 
+0000			ROM_SELDSK:    EQU 0x0f 
+0000			ROM_SETTRK:    EQU 0x12 
+0000			ROM_SETSEC:    EQU 0x15 
+0000			ROM_SETDMA:    EQU 0x18 
+0000			ROM_READ:      EQU 0x1b 
+0000			ROM_WRITE:     EQU 0x1e 
+0000			ROM_SECTRAN:   EQU 0x21 
+0000			;ROM_KBDSTAT:   EQU 0x2a ; There is more complete code than in the ROM 
+0000			ROM_KBDIN:     EQU 0x2d 
+0000			ROM_SIOSTI:    EQU 0x33 
+0000			ROM_SIOIN:     EQU 0x36 
+0000			ROM_SIOOUT:    EQU 0x39 
+0000			ROM_LISTST:    EQU 0x3c 
+0000			ROM_LIST:      EQU 0x3f 
+0000			ROM_SERSTO:    EQU 0x42 
+0000			ROM_VIDOUT:    EQU 0x45 
+0000			 
+0000			; IOBYTE CP/M mappings and Kaypro application 
+0000			; 
+0000			; Bits      Bits 6,7      Bits 4,5    Bits 2,3    Bits 0,1 
+0000			; Device    LIST          PUNCH       READER      CONSOLE 
+0000			; Value 
+0000			;   00      TTY:Serial    TTY:Serial  TTY:Serial  TTY:Serial 
+0000			;   01      CRT:Console   PTP:Serial  PTR:Serial  CRT:Console 
+0000			;   10      LPT:Parallel  UP1:Serial  UR1:Serial  BAT:Console 
+0000			;   11      UL1:Custom    UP2:Serial  UR2:Serial  UC1:Console 
+0000			; 
+0000			iobyte_console_mask:          EQU 0x03 
+0000			iobyte_list_mask:             EQU 0xc0 
+0000			iobyte_list_CRT:              EQU 0x40 
+0000			iobyte_list_PRT:              EQU 0x80 
+0000			 
+0000			 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			; BIOS ENTRY POINTS 
+0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0000			 
+0000			ORG 0f600h 
+f600 c3 1a f7		    JP BOOT 
+f603			EP_WBOOT: 
+f603 c3 5c f7		    JP WBOOT 
+f606 c3 60 f6		    JP CONST 
+f609 c3 7e f6		    JP CONIN 
+f60c c3 f5 f7		    JP CONOUT 
+f60f c3 d2 f6		    JP LIST 
+f612 c3 b3 f8		    JP PUNCH 
+f615 c3 b9 f6		    JP READER 
+f618 c3 02 f7		    JP HOME 
+f61b c3 0e f7		    JP SELDSK 
+f61e c3 06 f7		    JP SETTRK 
+f621 c3 0a f7		    JP SETSEC 
+f624 c3 12 f7		    JP SETDMA 
+f627 c3 48 f6		    JP READ 
+f62a c3 54 f6		    JP WRITE 
+f62d c3 e7 f6		    JP LISTST 
+f630 c3 16 f7		    JP SECTRAN 
+f633			 
+f633			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f633			; BIOS CONFIGURATION 
+f633			; 
+f633			; Using CONFIG.COM 
+f633			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f633			 
+f633			iobyte_default: 
+f633 81			    DB 81h ; Console to CRT and List to parallel port 
+f634			bios_config: 
+f634 20			    DB 20h 
+f635			key_maps: 
+f635			arrow_key_map: ; Mapping for the arrow keys 
+f635 0b 0a 08 0c	    DB 0Bh, 0Ah, 08h, 0Ch 
+f639			keypad_map: ; Mapping for the keypad 
+f639 ..			    DB "0123" 
+f63d ..			    DB "4567" 
+f641 ..			    DB "89-," 
+f645 ..			    DB "\r." 
+f647			baud_rate_default: 
+f647 05			    DB 05h 
+f648			 
+f648			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f648			; BIOS FUNCTIONS 
+f648			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f648			 
+f648			READ: 
+f648 2e 1b		    LD L, ROM_READ 
+f64a			READ_WRITE: 
+f64a			    ; Reset the CONST counter 
+f64a af			    XOR A 
+f64b 32 8c fa		    LD (CONST_COUNTER), A 
+f64e			    ; Read 
+f64e cd bb f6		    CALL ROM_JUMP 
+f651			    ; Let's pool from the keyboard on disk usage 
+f651			    ; Needed as on the Kaypro the keyboard doesn't generate interrupts 
+f651 c3 66 f8		    JP POOL_KEYBOARD 
+f654			 
+f654			WRITE: 
+f654			    ; Write 
+f654 2e 1e		    LD L,ROM_WRITE 
+f656			    ; Check bios_config_1 
+f656 3a 34 f6		    LD A,(bios_config) 
+f659 0f			    RRCA 
+f65a			    ; Is's false, write as requested 
+f65a 30 ee		    JR NC, READ_WRITE 
+f65c			    ; It's true, force the write type 
+f65c 0e 01		    LD C, rw_type_directory_write 
+f65e 18 ea		    JR READ_WRITE 
+f660			 
+f660			CONST: 
+f660			    ; Make sure the disk is off once every 256 calls 
+f660 21 8c fa		    LD HL, CONST_COUNTER 
+f663 35			    DEC (HL) ; TODO: review, was a INC 
+f664 cc 77 f6		    CALL Z, DISKOFF 
+f667			    ; What is the console assigned device? 
+f667 3a 03 00		    LD A, (iobyte) 
+f66a e6 03		    AND iobyte_console_mask 
+f66c 2e 33		    LD L, ROM_SIOSTI 
+f66e			    ; It's the serial port, query the serial port 
+f66e 28 4b		    JR Z,ROM_JUMP 
+f670			    ; It's the CRT, query the keyboard 
+f670 cd 66 f8		    CALL POOL_KEYBOARD 
+f673			    ; Return the result 
+f673			ERROR_CODE_INSTRUCTION: 
+f673			    ; This is self modifying code, the error code 
+f673			    ; is stored on the LD A, operand 
+f673 3e 00		    LD A,0x0 ; This 0x0 is changed elsewhere 
+f675 b7			    OR A 
+f676 c9			    RET 
+f677			 
+f677			DISKOFF: 
+f677 db 1c		    IN A, (io_1c_system_bits) 
+f679 cb f7		    SET system_bit_motors_neg, A 
+f67b d3 1c		    OUT (io_1c_system_bits), A 
+f67d c9			    RET 
+f67e			 
+f67e			CONIN: 
+f67e cd 77 f6		    CALL DISKOFF 
+f681			CONIN_BLOCK: 
+f681			    ; Wait until a character is ready 
+f681 cd 60 f6		    CALL CONST 
+f684 28 fb		    JR Z, CONIN_BLOCK 
+f686			    ; What is the console assigned device? 
+f686 3a 03 00		    LD A, (iobyte) 
+f689 e6 03		    AND iobyte_console_mask 
+f68b 2e 36		    LD L, ROM_SIOIN 
+f68d			    ; It's the TTY, query the serial port 
+f68d 28 2c		    JR Z, ROM_JUMP 
+f68f			    ; It's the CRT, query the keyboard 
+f68f			    ; Get the char on the buffer 
+f68f 2a 99 fa		    LD HL,(INPUT_BUFFER_GET_CURSOR) 
+f692 4e			    LD C,(HL) 
+f693			    ; Increase the get cursor 
+f693 cd ac f8		    CALL NEXT_L 
+f696 22 99 fa		    LD (INPUT_BUFFER_GET_CURSOR),HL 
+f699			    ; Get the error code from the insertion point on the buffer 
+f699 3a 97 fa		    LD A,(INPUT_BUFFER_INSERT_CURSOR) 
+f69c			    ; Has the get cursor has reached the insert cursor? 
+f69c 95			    SUB L 
+f69d			    ; No, continue 
+f69d 20 03		    JR NZ, PROCESS_CHAR_IN_BUFFER 
+f69f			    ; Yes, store the error code thar is returned later 
+f69f 32 74 f6		    LD (ERROR_CODE_INSTRUCTION+1),A 
+f6a2			PROCESS_CHAR_IN_BUFFER: 
+f6a2 79			    LD A,C 
+f6a3			    ; Get bios_config_7 
+f6a3 21 34 f6		    LD HL,bios_config 
+f6a6 cb 7e		    BIT bios_config_7,(HL) 
+f6a8			    ; It's set, no more processing needed 
+f6a8 c0			    RET NZ 
+f6a9			    ; It's clear 
+f6a9 b7			    OR A 
+f6aa			    ; If < 0x80, return it 
+f6aa f0			    RET P 
+f6ab			    ; Let's check the config to map the arrow keys and the numeric keypad 
+f6ab			    ; The ROM returns 80-83 for the arrows and 84-91 for the keypad 
+f6ab			    ; Is the key < 0x92? 
+f6ab fe 92		    CP 0x92 
+f6ad			    ; No, return it 
+f6ad d0			    RET NC 
+f6ae			    ; Yes, apply the mapping 
+f6ae e6 1f		    AND 0x1f 
+f6b0 21 35 f6		    LD HL, key_maps 
+f6b3 4f			    LD C, A 
+f6b4 06 00		    LD B, 0x0 
+f6b6 09			    ADD HL, BC 
+f6b7 7e			    LD A, (HL) 
+f6b8 c9			    RET 
+f6b9			 
+f6b9			READER: 
+f6b9			    ; Only the TTY is supported 
+f6b9 2e 36		    LD L,ROM_SIOIN 
+f6bb			 
+f6bb			ROM_JUMP: 
+f6bb f3			    DI 
+f6bc			    ; Activate the ROM bank 
+f6bc db 1c		    IN A, (io_1c_system_bits) 
+f6be cb ff		    SET system_bit_bank, A 
+f6c0 d3 1c		    OUT (io_1c_system_bits), A 
+f6c2			    ; Switch to the ROM stack 
+f6c2			    ; Note: the stack is not really changed. On other versions there 
+f6c2			    ; is an LD SP, 0xfc00 
+f6c2 ed 73 bb fa	    LD (STACK_SAVE), SP 
+f6c6 31 bb fa		    LD SP, STACK_SAVE 
+f6c9			    ; Push the ROM cleanup code to RET there 
+f6c9 7d			    LD A,L 
+f6ca 21 e7 f7		    LD HL,ROM_JUMP_CLEANUP 
+f6cd e5			    PUSH HL 
+f6ce 6f			    LD L,A 
+f6cf			    ; Jump to the ROM address in L, page 0 
+f6cf 26 00		    LD H,0x0 
+f6d1 e9			    JP (HL) 
+f6d2			 
+f6d2			LIST: 
+f6d2			    ; What is the list assigned device? 
+f6d2 3a 03 00		    LD A,(iobyte) 
+f6d5 e6 c0		    AND iobyte_list_mask 
+f6d7			    ; It's the TTY, write to the serial port 
+f6d7 ca b3 f8		    JP Z, OUT_SERIAL 
+f6da fe 80		    CP iobyte_list_PRT 
+f6dc			    ; It's the PRT, write to the parallel port 
+f6dc ca f2 f8		    JP Z, OUT_LPT 
+f6df fe 40		    CP iobyte_list_CRT 
+f6e1			    ; It's the CRT, write to video memory 
+f6e1 ca fd f7		    JP Z, OUT_CRT 
+f6e4			    ; It's the UL1, use the user providded code 
+f6e4 c3 80 fb		    JP OUT_UL1 
+f6e7			 
+f6e7			LISTST: 
+f6e7			    ; What is the list assigned device? 
+f6e7 3a 03 00		    LD A,(iobyte) 
+f6ea e6 c0		    AND iobyte_list_mask 
+f6ec 2e 42		    LD L,ROM_SERSTO 
+f6ee			    ; It's the TTY, query the serial port 
+f6ee 28 cb		    JR Z,ROM_JUMP 
+f6f0 2e 3c		    LD L,ROM_LISTST 
+f6f2 fe 80		    CP iobyte_list_PRT 
+f6f4			    ; It's the PRT, query the parallel port 
+f6f4 28 c5		    JR Z,ROM_JUMP 
+f6f6 fe 40		    CP iobyte_list_CRT 
+f6f8			    ; It's the CRT, return always 0xff 
+f6f8 3e ff		    LD A,0xff 
+f6fa c8			    RET Z 
+f6fb			    ; It's the UL1, use the user providded code 
+f6fb c3 83 fb		    JP STATUS_UL1 
+f6fe			 
+f6fe			INITDSK: 
+f6fe 2e 03		    LD L, ROM_INITDSK 
+f700 18 b9		    JR ROM_JUMP 
+f702			 
+f702			HOME: 
+f702 2e 0c		    LD L, ROM_HOME 
+f704 18 b5		    JR ROM_JUMP 
+f706			 
+f706			SETTRK: 
+f706 2e 12		    LD L, ROM_SETTRK 
+f708 18 b1		    JR ROM_JUMP 
+f70a			 
+f70a			SETSEC: 
+f70a 2e 15		    LD L, ROM_SETSEC 
+f70c 18 ad		    JR ROM_JUMP 
+f70e			 
+f70e			SELDSK: 
+f70e 2e 0f		    LD L, ROM_SELDSK 
+f710 18 a9		    JR ROM_JUMP 
+f712			 
+f712			SETDMA: 
+f712 2e 18		    LD L, ROM_SETDMA 
+f714 18 a5		    JR ROM_JUMP 
+f716			 
+f716			SECTRAN: 
+f716 2e 21		    LD L, ROM_SECTRAN 
+f718 18 a1		    JR ROM_JUMP 
+f71a			 
+f71a			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f71a			; BOOT 
+f71a			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f71a			 
+f71a			BOOT: 
+f71a cd fe f6		    CALL INITDSK 
+f71d			    ; Reset the stack 
+f71d 31 00 01		    LD SP, 0x100 
+f720			    ; Reset iobyte 
+f720 3a 33 f6		    LD A,(iobyte_default) 
+f723 32 03 00		    LD (iobyte),A 
+f726			    ; Reset serial baud rate 
+f726 3a 47 f6		    LD A, (baud_rate_default) 
+f729 d3 00		    OUT (io_00_serial_baud_rate), A 
+f72b cd cc f7		    CALL SETUP_ENTRYPOINTS 
+f72e			    ; Displat the welcome message 
+f72e cd 8f f9		    CALL WRITE_STRING_INLINE 
+f731 1a .. 00		    DB 1Ah,"KAYPRO CP/M 2.2 {GMv2.72}\r\n",0 
+f74e 21 00 fb		    LD HL, PRINTER_MESSAGE 
+f751 cd 95 f9		    CALL WRITE_STRING_HL 
+f754			    ; Select drive 0, track 0 
+f754 af			    XOR A 
+f755 32 04 00		    LD (user_drive),A 
+f758			    ; Continue boot to CP/M 
+f758 4f			    LD C,A 
+f759 c3 00 e0		    JP cpm_boot 
+f75c			 
+f75c			WBOOT: 
+f75c			    ; Reset the stack 
+f75c 31 00 01		    LD SP, 0x100 
+f75f cd fe f6		    CALL INITDSK 
+f762 21 34 f6		    LD HL, bios_config 
+f765			    ; Rest the bits 6 anf 7 of the bios config 
+f765 7e			    LD A, (HL) 
+f766 e6 3f		    AND 0x3f 
+f768 77			    LD (HL), A 
+f769			    ; Select drive 0, track 0 
+f769 0e 00		    LD C,0x0 
+f76b cd 0e f7		    CALL SELDSK 
+f76e 01 00 00		    LD BC, 0x0 
+f771 cd 06 f7		    CALL SETTRK 
+f774			    ; Set DMA address to where CP/M is 
+f774 01 00 e0		    LD BC, cpm_boot 
+f777 cd 12 f7		    CALL SETDMA 
+f77a ed 43 95 fa	    LD (DISK_DMA_ADDRESS),BC 
+f77e			    ; Read 44 sectors, start on sector 1 
+f77e 01 01 2c		    LD BC, 0x2c01 
+f781			WBOOT_LOOP: 
+f781 c5			    PUSH BC 
+f782 cd 0a f7		    CALL SETSEC 
+f785 cd 48 f6		    CALL READ 
+f788 c1			    POP BC 
+f789			    ; Read error? 
+f789 b7			    OR A 
+f78a			    ; Yes, restart at track 0, sector 1 
+f78a 20 d0		    JR NZ, WBOOT 
+f78c			    ; No, increase DMA by 128 bytes for the next sector 
+f78c c5			    PUSH BC 
+f78d 2a 95 fa		    LD HL, (DISK_DMA_ADDRESS) 
+f790 11 80 00		    LD DE, sector_size 
+f793 19			    ADD HL, DE 
+f794 22 95 fa		    LD (DISK_DMA_ADDRESS), HL 
+f797 e5			    PUSH HL 
+f798 c1			    POP BC 
+f799 cd 12 f7		    CALL SETDMA 
+f79c c1			    POP BC 
+f79d			    ; Are we done? 
+f79d 05			    DEC B 
+f79e			    ; Yes, exec CP/M 
+f79e ca b2 f7		    JP Z, WBOOT_SHOW_MESSAGE_LANGUAGE 
+f7a1			    ; No, next sector 
+f7a1 0c			    INC C 
+f7a2			    ; Are we past the last sector of track 0 
+f7a2 3e 28		    LD A, sectors_per_track 
+f7a4 b9			    CP C 
+f7a5			    ; No, read the next sector 
+f7a5 20 da		    JR NZ, WBOOT_LOOP 
+f7a7			    ; Yes, go to track 1, sector 16 
+f7a7 0e 10		    LD C, 0x10 
+f7a9 c5			    PUSH BC 
+f7aa 0e 01		    LD C, 0x1 
+f7ac cd 06 f7		    CALL SETTRK 
+f7af c1			    POP BC 
+f7b0			    ; Read the next sector 
+f7b0 18 cf		    JR WBOOT_LOOP 
+f7b2			 
+f7b2			WBOOT_SHOW_MESSAGE_LANGUAGE: 
+f7b2 cd cc f7		    CALL SETUP_ENTRYPOINTS 
+f7b5			    ; Select the message language 
+f7b5 3a 34 f6		    LD A, (bios_config) 
+f7b8 cb 6f		    BIT bios_config_5, A 
+f7ba 21 7b fa		    LD HL, WARM_BOOT_MESSAGE_DE 
+f7bd 20 03		    JR NZ, WBOOT_SHOW_MESSAGE 
+f7bf 21 6f fa		    LD HL, WARM_BOOT_MESSAGE_US 
+f7c2			WBOOT_SHOW_MESSAGE: 
+f7c2 cd 95 f9		    CALL WRITE_STRING_HL 
+f7c5			    ; Proceed with the CP/M warm boot 
+f7c5 3a 04 00		    LD A,(user_drive) 
+f7c8 4f			    LD C,A 
+f7c9 c3 03 e0		    JP cpm_warm_boot 
+f7cc			 
+f7cc			SETUP_ENTRYPOINTS: 
+f7cc 3e c3		    LD A,0xc3 ; JP opcode 
+f7ce			    ; Set the WBOOT jump at address 0 
+f7ce 32 00 00		    LD (reset), A 
+f7d1 21 03 f6		    LD HL, EP_WBOOT 
+f7d4 22 01 00		    LD (reset+1), HL 
+f7d7			    ; Set BDOS entry point at address 5 
+f7d7 32 05 00		    LD (bdos_ep), A 
+f7da 21 06 e8		    LD HL, bdos_entrypoint 
+f7dd 22 06 00		    LD (bdos_ep+1), HL 
+f7e0			    ; Reset any pending accent. Why 2 bytes? 
+f7e0 21 00 00		    LD HL,0x0000 
+f7e3 22 94 fa		    LD (PENDING_ACCENT),HL 
+f7e6 c9			    RET 
+f7e7			 
+f7e7			ROM_JUMP_CLEANUP: 
+f7e7 f5			    PUSH AF 
+f7e8			    ; Deactivate the ROM bank 
+f7e8 db 1c		    IN A, (io_1c_system_bits) 
+f7ea cb bf		    RES system_bit_bank, A 
+f7ec d3 1c		    OUT (io_1c_system_bits), A 
+f7ee f1			    POP AF 
+f7ef			    ; Restore the stack 
+f7ef ed 7b bb fa	    LD SP,(STACK_SAVE) 
+f7f3 fb			    EI 
+f7f4 c9			    RET 
+f7f5			 
+f7f5			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f7f5			; CONSOLE OUTPUT 
+f7f5			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f7f5			 
+f7f5			CONOUT: 
+f7f5			    ; What is the console assigned device? 
+f7f5 3a 03 00		    LD A, (iobyte) 
+f7f8 e6 03		    AND iobyte_console_mask 
+f7fa			    ; It's the TTY, write to the serial port (punch does that) 
+f7fa ca b3 f8		    JP Z,PUNCH 
+f7fd			    ; If not use CRT 
+f7fd			 
+f7fd			OUT_CRT: 
+f7fd 3a 34 f6		    LD A, (bios_config) 
+f800 cb 6f		    BIT bios_config_5, A 
+f802			    ; If bit 5 is clear, ignore translations 
+f802 28 3b		    JR Z, OUT_CRT_FILTER 
+f804 79			    LD A, C 
+f805			    ; Last char was a escape 
+f805 21 92 fa		    LD HL, OUTPUT_ESCAPE_STATE 
+f808 cb 7e		    BIT 0x7, (HL) 
+f80a			    ; Yes, process that 
+f80a 20 11		    JR NZ, OUT_HAD_ESCAPE 
+f80c			    ; Is the char a escape? 
+f80c fe 1b		    CP 0x1b ; ESC 
+f80e			    ; Yes, store the escape 
+f80e 28 17		    JR Z,OUT_CRT_ESCAPE 
+f810			    ; Are we processing an ESC=XY sequence? 
+f810 cb 76		    BIT 0x6,(HL) 
+f812			    ; No, process the char 
+f812 28 1e		    JR Z, OUT_CRT_ESC_TRANSLATE 
+f814			    ; Yes, continue processing the ESC=XY sequence 
+f814			    ; Reduce one the pending sequence chars 
+f814 23			    INC HL ; HL points to OUTPUT_ESCAPE_COUNT 
+f815 35			    DEC (HL) 
+f816 2b			    DEC HL ; HL points back to OUTPUT_ESCAPE_STATE 
+f817			    ; If the are more chars pendind, continue 
+f817 20 26		    JR NZ, OUT_CRT_FILTER 
+f819			    ; If not, reset the escape state and continue 
+f819 36 00		    LD (HL),0x0 
+f81b 18 22		    JR OUT_CRT_FILTER 
+f81d			 
+f81d			OUT_HAD_ESCAPE: 
+f81d			    ; Clear the escape flag 
+f81d cb be		    RES 0x7,(HL) 
+f81f			    ; If ESC =, then process it 
+f81f fe 3d		    CP '=' 
+f821 28 08		    JR Z,OUT_CRT_EQUAL 
+f823			    ; Is ESC ESC? 
+f823 fe 1b		    CP 0x1b ; ESC 
+f825			    ; No, apply a possible char translation 
+f825 20 0b		    JR NZ,OUT_CRT_ESC_TRANSLATE 
+f827			    ; Yes, ignore the second ESC 
+f827			 
+f827			OUT_CRT_ESCAPE: 
+f827			    ; Set the escape state 
+f827 36 80		    LD (HL),0x80 
+f829 18 14		    JR OUT_CRT_FILTER 
+f82b			 
+f82b			OUT_CRT_EQUAL: 
+f82b			    ; Advance the escape state 
+f82b 36 40		    LD (HL),0x40 
+f82d			    ; Set 2 pending escape chars 
+f82d 23			    INC HL ; HL points to OUTPUT_ESCAPE_COUNT 
+f82e 36 02		    LD (HL), 0x2 
+f830 18 0d		    JR OUT_CRT_FILTER 
+f832			 
+f832			OUT_CRT_ESC_TRANSLATE: 
+f832			    ; ESC plus some symbols is translated to special chars 
+f832 21 55 fa		    LD HL, VIDEO_OUT_ESC_ORIG 
+f835 11 5d fa		    LD DE, VIDEO_OUT_ESC_DEST 
+f838 01 08 00		    LD BC, 0x8 
+f83b cd 82 f9		    CALL REPLACE_BYTE 
+f83e 4f			    LD C, A 
+f83f			 
+f83f			OUT_CRT_FILTER: 
+f83f			    ; Apply AND 0x9F to the chars >= 0x80, collapsing then 
+f83f			    ; on the 0x80 to 0x9F, that will be 0x00 to 0x1F for the 
+f83f			    ; character generator as it ignores the high bit 
+f83f 79			    LD A, C 
+f840 e6 9f		    AND 0x9f 
+f842 f2 46 f8		    JP P, FILTER_NON_PRINTABLE_CONTROL_CHARS 
+f845 4f			    LD C, A 
+f846			FILTER_NON_PRINTABLE_CONTROL_CHARS: 
+f846 79			    LD A, C 
+f847			    ; Is the char a control char? 
+f847 fe 20		    CP 0x20 
+f849			    ; No, output it 
+f849 30 0b		    JR NC, VIDOUT 
+f84b			    ; Yes, it is printable? 
+f84b c5			    PUSH BC 
+f84c 21 5b f8		    LD HL, PRINTABLE_CONTROL_CHARS 
+f84f 01 0b 00		    LD BC, 0xb 
+f852 ed b1		    CPIR 
+f854 c1			    POP BC 
+f855			    ; No, do not output it 
+f855 c0			    RET NZ 
+f856			    ; Yes, output it 
+f856			 
+f856			VIDOUT: 
+f856 2e 45		    LD L,ROM_VIDOUT 
+f858 c3 bb f6		    JP ROM_JUMP 
+f85b			 
+f85b			PRINTABLE_CONTROL_CHARS: 
+f85b 07 08 0a 0b	    DB 0x07, 0x08, 0x0a, 0x0b 
+f85f 0c 0d 17 18	    DB 0x0c, 0x0d, 0x17, 0x18 
+f863 1a 1b 1e		    DB 0x1a, 0x1b, 0x1e 
+f866			 
+f866			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f866			; KKEYBOARD POLLING AND INPUT BUFFER 
+f866			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f866			POOL_KEYBOARD: 
+f866 f5			    PUSH AF ; TODO: where is the POP AF? 
+f867			KBDIN_CHECK: 
+f867			    ; Query the keyboard status, bit 0 is 1 on key pending 
+f867 db 07		    IN A, (io_07_keyboard_control) 
+f869 0f			    RRCA 
+f86a			    ; No key pending, we are done. 
+f86a 30 3e		    JR NC, FINISH_POOL_KEYBOARD 
+f86c			    ; Set SIO register to WR1 
+f86c 3e 01		    LD A, 0x1; WR1 
+f86e f3			    DI 
+f86f d3 07		    OUT (io_07_keyboard_control), A 
+f871			    ; Query WR1 
+f871 db 07		    IN A, (io_07_keyboard_control) 
+f873 fb			    EI 
+f874 e6 60		    AND 0x60 
+f876			    ; If bit 6 and 5 are clear, get the key 
+f876 28 06		    JR Z, KBDIN 
+f878			    ; If not, send an error reset to keyboard 
+f878			    ; control, beep and return 
+f878 3e 30		    LD A, 0x30 ; Error reset 
+f87a d3 07		    OUT (io_07_keyboard_control), A 
+f87c 18 27		    JR PLAY_BELL 
+f87e			 
+f87e			KBDIN: 
+f87e 2e 2d		    LD L,ROM_KBDIN 
+f880 cd bb f6		    CALL ROM_JUMP 
+f883 b7			    OR A 
+f884			    ; if the key is above 0x7f, we don't process it 
+f884 fa 8e f8		    JP M, STORE_KEY_IN_BUFFER 
+f887 cd 02 f9		    CALL PROCESS_KEY 
+f88a			    ; The key was invalid, beep and return 
+f88a 38 19		    JR C, PLAY_BELL 
+f88c			    ; They key was consumed, check for another 
+f88c 28 d9		    JR Z, KBDIN_CHECK 
+f88e			STORE_KEY_IN_BUFFER: 
+f88e			    ; Store the key in the input buffer 
+f88e 2a 97 fa		    LD HL,(INPUT_BUFFER_INSERT_CURSOR) 
+f891 77			    LD (HL),A 
+f892			    ; Store that there is a key avaialable 
+f892 3e ff		    LD A,0xff 
+f894 32 74 f6		    LD (ERROR_CODE_INSTRUCTION+1),A 
+f897			    ; Advance the insert cursor 
+f897 cd ac f8		    CALL NEXT_L 
+f89a			    ; Has the insert cursor reached the get cursor= 
+f89a 3a 99 fa		    LD A,(INPUT_BUFFER_GET_CURSOR) 
+f89d bd			    CP L 
+f89e			    ; Yes, the buffer is full, play bell and return 
+f89e 28 05		    JR Z,PLAY_BELL 
+f8a0			    ; Store the increased cursor 
+f8a0 22 97 fa		    LD (INPUT_BUFFER_INSERT_CURSOR),HL 
+f8a3			    ; Check for another key 
+f8a3 18 c2		    JR KBDIN_CHECK 
+f8a5			 
+f8a5			 
+f8a5			PLAY_BELL: 
+f8a5			    ; Seng a ^G to the keyboard 
+f8a5 0e 07		    LD C,0x7 
+f8a7 cd fd f7		    CALL OUT_CRT 
+f8aa			FINISH_POOL_KEYBOARD: 
+f8aa			    ; Counterpart of the PUSH AF at the start of POOL_KEYBOARD 
+f8aa f1			    POP AF 
+f8ab c9			    RET 
+f8ac			 
+f8ac			NEXT_L: 
+f8ac			    ; Increments L, when 0, go back to 0xbd 
+f8ac 2c			    INC L 
+f8ad 7d			    LD A,L 
+f8ae b7			    OR A 
+f8af c0			    RET NZ 
+f8b0 2e bd		    LD L,0xbd 
+f8b2 c9			    RET 
+f8b3			 
+f8b3			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f8b3			; ??? 
+f8b3			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f8b3			 
+f8b3			PUNCH: 
+f8b3			OUT_SERIAL: 
+f8b3 2e 39		    LD L, ROM_SIOOUT 
+f8b5			 
+f8b5			OUT_EXTERNAL: 
+f8b5 79			    LD A, C 
+f8b6			    ; Is char >= 0xc0? 
+f8b6 de c0		    SBC A, 0xc0 
+f8b8			    ; No, continue 
+f8b8 38 1b		    JR C, TRANSLATE_LOW_CHAR 
+f8ba			    ; Yes, translate the values chars from 0xc0 to 0xff 
+f8ba			    ; Note that the tables onle have 0x20 values not 0x40 
+f8ba e5			    PUSH HL 
+f8bb 21 34 f6		    LD HL, bios_config 
+f8be cb 6e		    BIT bios_config_5, (HL) 
+f8c0 21 e5 f9		    LD HL, PRINTER_OUT_HIGH_CHAR_ALT 
+f8c3 28 03		    JR Z, ADD_OFFSET 
+f8c5 21 05 fa		    LD HL, PRINTER_OUT_HIGH_CHAR_DE 
+f8c8			ADD_OFFSET: 
+f8c8			    ; Apply the offset HL = HL + char - 0xc0 
+f8c8 85			    ADD A, L 
+f8c9 6f			    LD L, A 
+f8ca 30 01		    JR NC, GET_TRANSLATED_HIGH_CHAR 
+f8cc 24			    INC H ; Carry on 16 bit addition 
+f8cd			GET_TRANSLATED_HIGH_CHAR: 
+f8cd 4e			    LD C,(HL) 
+f8ce 79			    LD A,C 
+f8cf			    ; If translated char is 0xff, put a space 
+f8cf 3c			    INC A 
+f8d0 e1			    POP HL 
+f8d1 20 02		    JR NZ, TRANSLATE_LOW_CHAR 
+f8d3 0e 20		    LD C, ' ' 
+f8d5			TRANSLATE_LOW_CHAR: 
+f8d5 3a 34 f6		    LD A, (bios_config) 
+f8d8 cb 6f		    BIT bios_config_5, A 
+f8da ca bb f6		    JP Z, ROM_JUMP 
+f8dd 79			    LD A,C 
+f8de			    ; Is char <= 0x20 
+f8de fe 20		    CP 0x20 
+f8e0			    ; No, output it 
+f8e0 da bb f6		    JP C, ROM_JUMP 
+f8e3			    ; Yes, translate the values chars from 0x20 to 0x7f 
+f8e3 e5			    PUSH HL 
+f8e4 21 00 fb		    LD HL, PRINTER_OUT_LOW_CHAR_TABLE - 0x20 
+f8e7			    ; Apply the offset HL = HL + C 
+f8e7 7d			    LD A,L 
+f8e8 81			    ADD A,C 
+f8e9 30 01		    JR NC,GET_TRANSLATED_LOW_CHAR 
+f8eb 24			    INC H ; Carry on 16 bit addition 
+f8ec			GET_TRANSLATED_LOW_CHAR: 
+f8ec 6f			    LD L,A 
+f8ed 4e			    LD C,(HL) 
+f8ee e1			    POP HL 
+f8ef			    ; Output it 
+f8ef c3 bb f6		    JP ROM_JUMP 
+f8f2			 
+f8f2			OUT_LPT: 
+f8f2 2e 3f		    LD L, ROM_LIST 
+f8f4 18 bf		    JR OUT_EXTERNAL 
+f8f6			 
+f8f6			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f8f6			; INPUT KEY PROCESSING 
+f8f6			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f8f6			 
+f8f6			REGISTER_ACUTE_ACCENT: 
+f8f6 3e 01		    LD A, pending_accent_acute 
+f8f8 18 02		    JR REGISTER_PENDING_ACCENT 
+f8fa			REGISTER_GRAVE_ACCENT: 
+f8fa 3e 02		    LD A, pending_accent_grave 
+f8fc			REGISTER_PENDING_ACCENT: 
+f8fc 21 94 fa		    LD HL, PENDING_ACCENT 
+f8ff 77			    LD (HL), A 
+f900			    ; Return 0, meaning that the key is consumed and another one is needed 
+f900 af			    XOR A 
+f901 c9			    RET 
+f902			 
+f902			PROCESS_KEY: 
+f902			    ; Transform the key press to the corresponding character 
+f902			    ; using the bios config for the keyboard layout selected. 
+f902			    ; Carry is set for invalid keys. 
+f902			    ; 
+f902			    ; Check accent. Is there is one, store it and return 0. 
+f902 fe 3d		    CP '=' 
+f904 28 f0		    JR Z, REGISTER_ACUTE_ACCENT 
+f906 fe 2b		    CP '+' 
+f908 28 f0		    JR Z, REGISTER_GRAVE_ACCENT 
+f90a f5			    PUSH AF 
+f90b			    ; Is there a pending accent? 
+f90b 21 94 fa		    LD HL, PENDING_ACCENT 
+f90e 7e			    LD A, (HL) 
+f90f e6 03		    AND pending_accent_acute+pending_accent_grave 
+f911			    ; Yes process the key adding accent 
+f911 20 3a		    JR NZ, HAD_PENDING_ACCENT 
+f913			    ; No, continue 
+f913 f1			    POP AF 
+f914			    ; Replace symbols (8 cases) 
+f914 21 34 f6		    LD HL,bios_config 
+f917 cb 6e		    BIT bios_config_5, (HL) 
+f919 21 a1 f9		    LD HL, LOOKUP_KEY_US 
+f91c 01 0a 00		    LD BC,0xa 
+f91f 11 b5 f9		    LD DE, LOOKUP_KEY_ALT 
+f922 28 03		    JR Z, REPLACE_KEY 
+f924 11 ab f9		    LD DE, LOOKUP_KEY_DE 
+f927			REPLACE_KEY: 
+f927 cd 82 f9		    CALL REPLACE_BYTE 
+f92a			    ; If a match is found, do not continue replacing 
+f92a 28 0c		    JR Z, KEY_TRANSLATION_DONE 
+f92c			    ; Replace symbols (7 cases) 
+f92c 21 bf f9		    LD HL, LOOKUP_KEY2_US 
+f92f 11 d2 f9		    LD DE, LOOKUP_KEY2_INTL 
+f932 01 13 00		    LD BC, 0x13 
+f935 cd 82 f9		    CALL REPLACE_BYTE 
+f938			KEY_TRANSLATION_DONE: 
+f938			    ; Reset the pending accent 
+f938 21 94 fa		    LD HL, PENDING_ACCENT 
+f93b 36 00		    LD (HL), pending_accent_none 
+f93d			    ; Copy the most sgnificant bit on the carry flag 
+f93d 07			    RLCA 
+f93e 1f			    RRA 
+f93f			    ; Is the mode set to 7 or to 8 bits? 
+f93f 21 34 f6		    LD HL, bios_config 
+f942 cb 76		    BIT bios_config_6, (HL) 
+f944			    ; If valid (<=7f), make sure ff is marked as invalid. Not needed. 
+f944 30 01		    JR NC, MARK_FF_AS_INVALID 
+f946			    ; It's 7 bit mode, we are done all >80 are invalid 
+f946 c8			    RET Z 
+f947			    ; It's 8 bit mode, only ff is invalid 
+f947			MARK_FF_AS_INVALID: 
+f947 4f			    LD C,A 
+f948 0c			    INC C 
+f949 37			    SCF 
+f94a			    ; If 0 (was ff) return as invalid (with the carry set) 
+f94a c8			    RET Z 
+f94b			    ; For the rest, crear the carry (the key is valid) 
+f94b 3f			    CCF 
+f94c c9			    RET 
+f94d			 
+f94d			HAD_PENDING_ACCENT: 
+f94d f1			    POP AF 
+f94e 21 34 f6		    LD HL, bios_config 
+f951 cb 6e		    BIT bios_config_5, (HL) 
+f953 21 25 fa		    LD HL, LOOKUP_ACCENT_SYMBOLS_US 
+f956 01 10 00		    LD BC, 0x10 
+f959 11 35 fa		    LD DE, LOOKUP_ACCENT_SYMBOLS_ALT 
+f95c 28 03		    JR Z, REPLACE_ACCENT_SYMBOLS 
+f95e 11 45 fa		    LD DE, LOOKUP_ACCENT_SYMBOLS_DE 
+f961			REPLACE_ACCENT_SYMBOLS: 
+f961 cd 82 f9		    CALL REPLACE_BYTE 
+f964			    ; If a match is found, do not continue replacing 
+f964 28 d2		    JR Z,KEY_TRANSLATION_DONE 
+f966			    ; Prepare acute or grave accentuation 
+f966 21 94 fa		    LD HL, PENDING_ACCENT 
+f969 cb 46		    BIT 0x0,(HL) 
+f96b 21 8d fa		    LD HL, VOWELS_NAKED 
+f96e 01 05 00		    LD BC, 0x5 
+f971 11 65 fa		    LD DE, VOWELS_ACUTE 
+f974 20 03		    JR NZ, ADD_ACCENT_TO_VOCALS 
+f976 11 6a fa		    LD DE, VOWELS_GRAVE 
+f979			ADD_ACCENT_TO_VOCALS: 
+f979 cd 82 f9		    CALL REPLACE_BYTE 
+f97c 28 ba		    JR Z, KEY_TRANSLATION_DONE 
+f97e			    ; If no match is found, it's an illegal key press 
+f97e 3e ff		    LD A,0xff 
+f980 18 b6		    JR KEY_TRANSLATION_DONE 
+f982			 
+f982			REPLACE_BYTE: 
+f982			    ; Search the byte on the HL table 
+f982 c5			    PUSH BC 
+f983 ed b1		    CPIR 
+f985 e1			    POP HL 
+f986			    ; If nothing found, return 
+f986 c0			    RET NZ 
+f987			    ; Found, replace the byte 
+f987 03			    INC BC 
+f988 b7			    OR  A 
+f989 ed 42		    SBC HL,BC 
+f98b 19			    ADD HL,DE 
+f98c af			    XOR A 
+f98d 7e			    LD A,(HL) 
+f98e c9			    RET 
+f98f			 
+f98f			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f98f			; WRITE STRINGS 
+f98f			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f98f			 
+f98f			WRITE_STRING_INLINE: 
+f98f			    ; Retrieve the string char at the return address in the stack 
+f98f e3			    EX (SP),HL 
+f990 cd 95 f9		    CALL WRITE_STRING_HL 
+f993			    ; Advance the return address past the string 
+f993 e3			    EX (SP),HL 
+f994 c9			    RET 
+f995			 
+f995			WRITE_STRING_HL: 
+f995 7e			    LD A,(HL) 
+f996			    ; Is the char a null? 
+f996 b7			    OR A 
+f997			    ; Yes, return 
+f997 c8			    RET Z 
+f998			    ; No, write it 
+f998 4f			    LD C,A 
+f999 e5			    PUSH HL 
+f99a cd f5 f7		    CALL CONOUT 
+f99d e1			    POP HL 
+f99e			    ; Process the next char 
+f99e 23			    INC HL 
+f99f 18 f4		    JR WRITE_STRING_HL 
+f9a1			 
+f9a1			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f9a1			; VARIABLES AND CONSTANTS 
+f9a1			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+f9a1			 
+f9a1			; Keyboard layout changes 
+f9a1			LOOKUP_KEY_US: 
+f9a1			    ; US keyboard layout 
+f9a1 ..			    DB "[{;:'\"\\|-#" 
+f9ab			LOOKUP_KEY_DE: 
+f9ab			    ; German keyboard layout 
+f9ab .. ff ff ..	    DB "}]|\\{[",0xFF,0xFF,"~@" 
+f9b5			LOOKUP_KEY_ALT: 
+f9b5			    ; Alt keyboard layout 
+f9b5 da ce d9 cd d6 cc .. de dc	    DB 0xDA,0xCE,0xD9,0xCD,0xD6,0xCC,"[]",0xde,0xdc 
+f9bf			LOOKUP_KEY2_US: 
+f9bf			    ; US keyboard layout 
+f9bf .. 19 1a		    DB "@^&*()_y]}z<>/?ZY",0x19,0x1a 
+f9d2			LOOKUP_KEY2_INTL: 
+f9d2			    ; International keyboard layout 
+f9d2 .. 1a 19		    DB "\"&/()=?z+*y;:-_YZ",0x1a,0x19 
+f9e5			; Transformation of chars for printing 
+f9e5			PRINTER_OUT_HIGH_CHAR_ALT: 
+f9e5			    ; Translations of chars 0xc0 to 0xfd for TTY or LPT output 
+f9e5 .. ff .. ff	    DB "naeiouaeiou",0xFF,"[\\]",0xFF 
+f9f5 .. ff .. ff ..	    DB "Naeiou{ei|}",0xFF,"@c~",0xFF,"" 
+fa05			PRINTER_OUT_HIGH_CHAR_DE: 
+fa05			    ; Translations of chars 0xc0 to 0xfd for TTY or LPT output 
+fa05 .. ff .. ff	    DB "naeiouaeiou",0xFF,"AOU",0xFF 
+fa15 .. ff ff .. ff ff	    DB "Naeiouaeiou",0xFF,0xFF,"c",0xFF,0xFF 
+fa25			 
+fa25			; Modified chars with accents on the international keyboards 
+fa25			LOOKUP_ACCENT_SYMBOLS_US: 
+fa25			    ; Key that can be modfied with an accent on the US keyboard layout 
+fa25 ..			    DB "2@3#6^`~\\|,<.>/?" 
+fa35			LOOKUP_ACCENT_SYMBOLS_ALT: 
+fa35			    ; Modifed keys on the Alt keyboard layout 
+fa35 .. cb .. db ..	    DB "@@#",0xCB,"^^",0xDB,"'{}<<>>\\|" 
+fa45			LOOKUP_ACCENT_SYMBOLS_DE: 
+fa45			    ; Modifed keys on the German keyboard layout 
+fa45 ff ff .. ff .. ff .. ff ff .. ff ff	    DB 0xFF,0xFF,"#",0xFF,"^^",0xFF,"'",0xFF,0xFF,"<<>>",0xFF,0xFF 
+fa55			 
+fa55			; Transformation of chars for display accorging to the 
+fa55			; codepage 1023 https://en.wikipedia.org/wiki/Code_page_1023 
+fa55			VIDEO_OUT_ESC_ORIG: 
+fa55 ..			    DB "[\\]{|}@~" 
+fa5d			VIDEO_OUT_ESC_DEST: 
+fa5d cc cd ce d6 d9 da dc de	    DB 0xCC,0xCD,0xCE,0xD6,0xD9,0xDA,0xDC,0xDE 
+fa65			    ;  ñ    £    ¡    Ñ    º    §    ß    ¿ 
+fa65			 
+fa65			; Application of accents on keyboard input 
+fa65			VOWELS_ACUTE: 
+fa65			    ; Acute accentuation on vowels 
+fa65 ff c2 ff ff ff	    DB 0xFF,0xC2,0xFF,0xFF,0xFF 
+fa6a			VOWELS_GRAVE: 
+fa6a			    ; Grave accentuation on vowels 
+fa6a d1 d2 ff ff d5	    DB 0xD1,0xD2,0xFF,0xFF,0xD5 
+fa6f			 
+fa6f			WARM_BOOT_MESSAGE_US: 
+fa6f .. 00		    DB "\r\nWarm Boot",0 
+fa7b			WARM_BOOT_MESSAGE_DE: 
+fa7b .. 00		    DB "\r\nWarmes Urladen",0 
+fa8c			    ;DB "\r\nReinicializaci",0xC4,"n de ",0 
+fa8c			CONST_COUNTER: 
+fa8c cc			    DB 0xCC 
+fa8d			VOWELS_NAKED: 
+fa8d			    ; Base for vowel accentuation 
+fa8d ..			    DB "aeiou" 
+fa92			OUTPUT_ESCAPE_STATE: 
+fa92			    ; Bit 7 true if prev was ESC 
+fa92			    ; Bit 6 true if prev was ESC= 
+fa92 00			    DB 0x00 
+fa93			OUTPUT_ESCAPE_COUNT: 
+fa93 00			    DB 0x00 
+fa94			PENDING_ACCENT: 
+fa94 00			    DB pending_accent_none 
+fa95			DISK_DMA_ADDRESS: 
+fa95 00 00		    DW 0x0000 
+fa97			INPUT_BUFFER_INSERT_CURSOR: 
+fa97 c5 fa		    DW INPUT_BUFFER 
+fa99			INPUT_BUFFER_GET_CURSOR: 
+fa99 c5 fa		    DW INPUT_BUFFER 
+fa9b			FILLER: 
+fa9b fa c0 fa 00 00 00 aa 88	    DB 0xFA,0xC0,0xFA,0x00,0x00,0x00,0xAA,0x88 
+faa3 41 12 24 80 8e 04 8e 04	    DB 0x41,0x12,0x24,0x80,0x8E,0x04,0x8E,0x04 
+faab 02 04 88 9c c5 04 53 ff	    DB 0x02,0x04,0x88,0x9C,0xC5,0x04,0x53,0xFF 
+fab3 14 05 0f 04 28 08 62 df	    DB 0x14,0x05,0x0f,0x04,0x28,0x08,0x62,0xDF 
+fabb			STACK_SAVE: 
+fabb 3b eb		    DW 0xEB3B 
+fabd			FILLER2: 
+fabd 61 65 6e 64 65 72	    DB 0x61,0x65,0x6e,0x64,0x65,0x72 
+fac3 6e 0d		    DB 0x6E,0x0D 
+fac5			INPUT_BUFFER: 
+fac5 48 21 20 08 22 21	    DB 0x48,0x21,0x20,0x08,0x22,0x21 
+facb 08 84 00 02 00 24 10 04	    DB 0x08,0x84,0x00,0x02,0x00,0x24,0x10,0x04 
+fad3 24 22 10 84 92 04 84 20	    DB 0x24,0x22,0x10,0x84,0x92,0x04,0x84,0x20 
+fadb 08 92 40 10 08 42 11 24	    DB 0x08,0x92,0x40,0x10,0x08,0x42,0x11,0x24 
+fae3 21 04 21 12 11 01 08 91	    DB 0x21,0x04,0x21,0x12,0x11,0x01,0x08,0x91 
+faeb 12 12 21 10 08 08 44 48	    DB 0x12,0x12,0x21,0x10,0x08,0x08,0x44,0x48 
+faf3 92 24 02 01 00 81 24 90	    DB 0x92,0x24,0x02,0x01,0x00,0x81,0x24,0x90 
+fafb 89 22 48 20 04	    DB 0x89,0x22,0x48,0x20,0x04 
+fb00			 
+fb00			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+fb00			; PRINTER CONFIGURATION 
+fb00			; 128 bytes available at 0xfb00 for the printer message on startup 
+fb00			; and to remap the characters if needed 
+fb00			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+fb00			 
+fb00			PRINTER_MESSAGE: 
+fb00 .. 00		    DB "STANDARD PRINTER",0 
+fb11			PRINTER_MESSAGE_FILLER: 
+fb11 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f	    DB 0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1A,0x1B,0x1C,0x1D,0x1E,0x1F 
+fb20			PRINTER_OUT_LOW_CHAR_TABLE: 
+fb20			    ; Translations of chars 0x20 to 0x7f for TTY or LPT output 
+fb20 ..			    DB " !\"#$%&'()*+,-./0123456789:;<=>?" 
+fb40 ..			    DB "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_" 
+fb60 .. 7f		    DB "`abcdefghijklmnopqrstuvwxyz{|}~",0x7F 
+fb80			 
+fb80			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+fb80			; USER LIST DEVICE 
+fb80			; 128 bytes available at 0xfb80 
+fb80			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+fb80			 
+fb80			OUT_UL1: 
+fb80			    ; Not implemented, 3 bytes available 
+fb80 0x00...		    DS 3, 0x00 
+fb83			STATUS_UL1: 
+fb83			    ; Not implemented, 125 more bytes available 
+fb83 0x00...		    DS 125, 0x00 
+# End of file bios_22de.s
+fc00

@@ -1,4 +1,4 @@
-# File bios_es.s
+# File bios_22sp.s
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; CP/M BIOS for the KAYPRO CP/M 2.2 {SPv2.72} 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
@@ -972,5 +972,5 @@ fb80 0x00...		    DS 3, 0x00
 fb83			STATUS_UL1: 
 fb83			    ; Not implemented, 125 more bytes available 
 fb83 0x00...		    DS 125, 0x00 
-# End of file bios_es.s
+# End of file bios_22sp.s
 fc00

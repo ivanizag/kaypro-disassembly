@@ -1,4 +1,4 @@
-# File bios_us.s
+# File bios_22.s
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; CONSTANTS 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
@@ -402,5 +402,5 @@ fbf8 14 05 0f 04	    DB $14, $05, $0F, $04
 fbfc 13 06		    DB $13, $06 
 fbfe c2 fb		    DW ROM_JUMP_CLEANUP ; not used 
 fc00			 
-# End of file bios_us.s
+# End of file bios_22.s
 fc00
