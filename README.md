@@ -4,14 +4,16 @@
 
 [ROMS](rom):
 
-- [81-149c](rom/81-149c.s), downloaded from [Retroarchive](http://www.retroarchive.org/maslin/disks/roms/index.html)
-- [81-232](rom/81-232.s), dumped from my Kaypro
+- [81-149c](rom/81-149c.s): `*    KAYPRO II    *` downloaded from [Retroarchive](http://www.retroarchive.org/maslin/disks/roms/index.html)
+- [81-232](rom/81-232.s): `*     KAYPRO      *` dumped from my Kaypro, support for double side disks.
+- [omni2](rom/omni2.s): `*     Omni  II    *` like the 81-232 with changes on the character handling. 
 
 [CP/M BIOS](bios):
 
-- [CP/M 2.2 for ROM 81-149](bios/bios_22.s) `KAYPRO II 64k CP/M vers 2.2` From [kpii-149 in retroarchive](http://www.retroarchive.org/maslin/disks/kaypro/kpii-149.td0). Identical to CP/M 2.2 for ROM 81-232A (kpro-ii.td0).
-- [CP/M 2.2 Spanish for ROM 81-232](bios/bios_22sp.s) `KAYPRO CP/M 2.2 {SPv2.72}` From my collection. Has translated versions of the warm boot message and does the character translation for the Spanish keyboard
-- [CP/M 2.2 German for ROM 81-232](bios/bios_22sp.s) `KAYPRO CP/M 2.2 {GMv2.72}` From [kayiiger in in z80.eu](http://www.z80.eu/downloads/KayIIger.zip). Has translated versions of the warm boot message and does the character translation for the German keyboard
+- [CP/M 2.2 F for ROM 81-149](bios/bios_22.s): `KAYPRO II 64k CP/M vers 2.2` From [kpii-149 in retroarchive](http://www.retroarchive.org/maslin/disks/kaypro/kpii-149.td0). Identical to CP/M 2.2 for ROM 81-232A (kpro-ii.td0).
+- [CP/M 2.2 F for Kaypro IV](bios/bios_22f_IV.s): `KAYPRO IV 64k CP/M vers 2.2` From [K4836765 in retroarchive](http://www.retroarchive.org/maslin/disks/kaypro/k4836765.td0). It only changes a byte on the welcome string.
+- [CP/M 2.2 Spanish for ROM 81-232](bios/bios_22sp.s): `KAYPRO CP/M 2.2 {SPv2.72}` From my collection. Has translated versions of the warm boot message and does the character translation for the Spanish keyboard
+- [CP/M 2.2 German for ROM 81-232](bios/bios_22sp.s): `KAYPRO CP/M 2.2 {GMv2.72}` From [kayiiger in in z80.eu](http://www.z80.eu/downloads/KayIIger.zip). Has translated versions of the warm boot message and does the character translation for the German keyboard
 
 [Executables](executables)
 
