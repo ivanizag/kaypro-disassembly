@@ -29,7 +29,7 @@
 0000			; Values for PENDING_ACCENT 
 0000			pending_accent_none:        EQU 0 
 0000			pending_accent_acute:       EQU 1 
-0000			pending_accent_grave:       EQU 2 
+0000			pending_accent_diaeresis:   EQU 2 
 0000			 
 0000			; Bits used on the BIOS_CONFIG 
 0000			bios_config_1:              EQU 0 
@@ -701,8 +701,8 @@ f8f6
 f8f6			REGISTER_ACUTE_ACCENT: 
 f8f6 3e 01		    LD A, pending_accent_acute 
 f8f8 18 02		    JR REGISTER_PENDING_ACCENT 
-f8fa			REGISTER_GRAVE_ACCENT: 
-f8fa 3e 02		    LD A, pending_accent_grave 
+f8fa			REGISTER_DIAERESIS_ACCENT: 
+f8fa 3e 02		    LD A, pending_accent_diaeresis 
 f8fc			REGISTER_PENDING_ACCENT: 
 f8fc 21 7a fa		    LD HL, PENDING_ACCENT 
 f8ff 77			    LD (HL), A 
@@ -719,12 +719,12 @@ f902			    ; Check accent. Is there is one, store it and return 0.
 f902 fe 5b		    CP '[' 
 f904 28 f0		    JR Z, REGISTER_ACUTE_ACCENT 
 f906 fe 7b		    CP '{' 
-f908 28 f0		    JR Z, REGISTER_GRAVE_ACCENT 
+f908 28 f0		    JR Z, REGISTER_DIAERESIS_ACCENT 
 f90a f5			    PUSH AF 
 f90b			    ; Is there a pending accent? 
 f90b 21 7a fa		    LD HL, PENDING_ACCENT 
 f90e 7e			    LD A, (HL) 
-f90f e6 03		    AND pending_accent_acute+pending_accent_grave 
+f90f e6 03		    AND pending_accent_acute+pending_accent_diaeresis 
 f911			    ; Yes process the key adding accent 
 f911 20 3a		    JR NZ, HAD_PENDING_ACCENT 
 f913			    ; No, continue 
@@ -784,14 +784,14 @@ f961			REPLACE_ACCENT_SYMBOLS:
 f961 cd 82 f9		    CALL REPLACE_BYTE 
 f964			    ; If a match is found, do not continue replacing 
 f964 28 d2		    JR Z,KEY_TRANSLATION_DONE 
-f966			    ; Prepare acute or grave accentuation 
+f966			    ; Prepare acute or diaeresis accentuation 
 f966 21 7a fa		    LD HL, PENDING_ACCENT 
 f969 cb 46		    BIT 0x0,(HL) 
 f96b 21 73 fa		    LD HL, VOWELS_NAKED 
 f96e 01 05 00		    LD BC, 0x5 
 f971 11 41 fa		    LD DE, VOWELS_ACUTE 
 f974 20 03		    JR NZ, ADD_ACCENT_TO_VOCALS 
-f976 11 46 fa		    LD DE, VOWELS_GRAVE 
+f976 11 46 fa		    LD DE, VOWELS_DIAERESIS 
 f979			ADD_ACCENT_TO_VOCALS: 
 f979 cd 82 f9		    CALL REPLACE_BYTE 
 f97c 28 ba		    JR Z, KEY_TRANSLATION_DONE 
@@ -897,7 +897,7 @@ fa41			; Application of accents on keyboard input
 fa41			VOWELS_ACUTE: 
 fa41			    ; Acute accentuation on vowels 
 fa41 c1 c2 c3 c4 c5	    DB 0xC1,0xC2,0xC3,0xC4,0xC5 
-fa46			VOWELS_GRAVE: 
+fa46			VOWELS_DIAERESIS: 
 fa46			    ; Grave accentuation on vowels 
 fa46 d6 d7 d8 d9 da	    DB 0xD6,0xD7,0xD8,0xD9,0xDA 
 fa4b			 

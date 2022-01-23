@@ -28,7 +28,7 @@ rw_type_directory_write:    EQU 1
 ; Values for PENDING_ACCENT
 pending_accent_none:        EQU 0
 pending_accent_acute:       EQU 1
-pending_accent_grave:       EQU 2
+pending_accent_diaeresis:   EQU 2
 
 ; Bits used on the BIOS_CONFIG
 bios_config_1:              EQU 0
@@ -700,8 +700,8 @@ OUT_LPT:
 REGISTER_ACUTE_ACCENT:
     LD A, pending_accent_acute
     JR REGISTER_PENDING_ACCENT
-REGISTER_GRAVE_ACCENT:
-    LD A, pending_accent_grave
+REGISTER_DIAERESIS_ACCENT:
+    LD A, pending_accent_diaeresis
 REGISTER_PENDING_ACCENT:
     LD HL, PENDING_ACCENT
     LD (HL), A
@@ -718,12 +718,12 @@ PROCESS_KEY:
     CP '='
     JR Z, REGISTER_ACUTE_ACCENT
     CP '+'
-    JR Z, REGISTER_GRAVE_ACCENT
+    JR Z, REGISTER_DIAERESIS_ACCENT
     PUSH AF
     ; Is there a pending accent?
     LD HL, PENDING_ACCENT
     LD A, (HL)
-    AND pending_accent_acute+pending_accent_grave
+    AND pending_accent_acute+pending_accent_diaeresis
     ; Yes process the key adding accent
     JR NZ, HAD_PENDING_ACCENT
     ; No, continue
@@ -783,14 +783,14 @@ REPLACE_ACCENT_SYMBOLS:
     CALL REPLACE_BYTE
     ; If a match is found, do not continue replacing
     JR Z,KEY_TRANSLATION_DONE
-    ; Prepare acute or grave accentuation
+    ; Prepare acute or diaeresis accentuation
     LD HL, PENDING_ACCENT
     BIT 0x0,(HL)
     LD HL, VOWELS_NAKED
     LD BC, 0x5
     LD DE, VOWELS_ACUTE
     JR NZ, ADD_ACCENT_TO_VOCALS
-    LD DE, VOWELS_GRAVE
+    LD DE, VOWELS_DIAERESIS
 ADD_ACCENT_TO_VOCALS:
     CALL REPLACE_BYTE
     JR Z, KEY_TRANSLATION_DONE
@@ -895,7 +895,7 @@ VIDEO_OUT_ESC_DEST:
 VOWELS_ACUTE:
     ; Acute accentuation on vowels
     DB 0xFF,0xC2,0xFF,0xFF,0xFF
-VOWELS_GRAVE:
+VOWELS_DIAERESIS:
     ; Grave accentuation on vowels
     DB 0xD1,0xD2,0xFF,0xFF,0xD5
 
