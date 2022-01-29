@@ -1,6 +1,8 @@
 cd bios
-./verify.sh bios_22sp.s
 ./verify.sh bios_22.s
+./verify.sh bios_22f_IV.s
+./verify.sh bios_22sp.s
+./verify.sh bios_22de.s
 cd ..
 cd rom
 ./verify.sh 81-149c.s

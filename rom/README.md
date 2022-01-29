@@ -45,6 +45,8 @@ After that, the disk can be booted
 
 To load the OS, the first sector 0 of track 0 of disk A is loaded. That sector has the
 information of how many more sectors have to be read, where they have to be loaded and where to jump execution to start the OS.
+Note that the code only works if booting from a double density
+disk.
 
 ## Floppy disk read and write
 

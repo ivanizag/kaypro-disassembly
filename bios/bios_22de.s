@@ -20,10 +20,18 @@ cpm_boot:                   EQU 0xe000
 cpm_warm_boot:              EQU 0xe003
 bdos_entrypoint:            EQU 0xe806
 
-sector_size:                EQU 128
-sectors_per_track:          EQU 40
 ; See CP/M 2.2 System alteration guide appendix G
 rw_type_directory_write:    EQU 1
+
+; Info to reload CP/M from disk
+; Like on the ROM, it only works with double density disks
+logical_sector_size:                  EQU 128
+double_density_sectors_per_track:     EQU 40
+double_density_sectors_for_directory: EQU 16
+boot_sectors:                         EQU 44
+    ; On the actual CP/M 2.2 disks this number is higher
+    ;   - 48 sectors on CPM 2.2f
+    ;   - 55 sectors on CPM 2.2 SP or DE
 
 ; Values for PENDING_ACCENT
 pending_accent_none:        EQU 0
@@ -363,7 +371,7 @@ WBOOT:
     CALL SETDMA
     LD (DISK_DMA_ADDRESS),BC
     ; Read 44 sectors, start on sector 1
-    LD BC, 0x2c01
+    LD BC, (boot_sectors * 256) + 1
 WBOOT_LOOP:
     PUSH BC
     CALL SETSEC
@@ -376,7 +384,7 @@ WBOOT_LOOP:
     ; No, increase DMA by 128 bytes for the next sector
     PUSH BC
     LD HL, (DISK_DMA_ADDRESS)
-    LD DE, sector_size
+    LD DE, logical_sector_size
     ADD HL, DE
     LD (DISK_DMA_ADDRESS), HL
     PUSH HL
@@ -390,12 +398,13 @@ WBOOT_LOOP:
     ; No, next sector
     INC C
     ; Are we past the last sector of track 0
-    LD A, sectors_per_track
+    LD A, double_density_sectors_per_track
     CP C
     ; No, read the next sector
     JR NZ, WBOOT_LOOP
-    ; Yes, go to track 1, sector 16
-    LD C, 0x10
+    ; Yes, track 0 completed. Continue with track 1
+    ; Skip the 16 sectors used for the directory
+    LD C, double_density_sectors_for_directory                                
     PUSH BC
     LD C, 0x1
     CALL SETTRK

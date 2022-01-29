@@ -69,9 +69,8 @@
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; Disk constants 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-0000			logical_sector_size:                EQU 128 ; See NOTES 
-0000			double_density_sector_size:         EQU 1024 ; See NOTES 
-0000			sectors_per_track_double_density:   EQU 40 ; See NOTES 
+0000			logical_sector_size:                EQU 128 
+0000			double_density_block_size:          EQU 1024 
 0000			disk_count:                         EQU 2 ; 0 is A: and 1 is B: 
 0000			 
 0000			fdc_command_restore:                EQU 0x00 
@@ -94,13 +93,20 @@
 0000			 
 0000			 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-0000			; The first boot sector has the info about 
-0000			; the rest of the boot sector loading 
+0000			; Info to load CP/M on boot. 
+0000			; The first boot sector has the info about how many addtional 
+0000			; sectors to read and where to store them. 
+0000			; Note that boot only works with double density disks. On DD disks, 
+0000			; the OS is on the first track and some more sectors after the 
+0000			; directory area. 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			first_sector_load_address:     EQU 0xfa00 
 0000			address_to_load_second_sector: EQU 0xfa02 
 0000			address_to_exec_boot:          EQU 0xfa04 
 0000			count_of_boot_sectors_needed:  EQU 0xfa06 
+0000			 
+0000			double_density_sectors_per_track:     EQU 40 
+0000			double_density_sectors_for_directory: EQU 16 
 0000			 
 0000			 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
@@ -408,14 +414,15 @@
 00f7 c8			    RET Z 
 00f8			    ; Not finished, calculate the next sector and track 
 00f8 0c			    INC C 
-00f9 3e 28		    LD A, sectors_per_track_double_density 
+00f9 3e 28		    LD A, double_density_sectors_per_track 
 00fb			    ; Are we on the last sector of the track? 
 00fb b9			    CP C 
 00fc			    ; No, continue reading sector + 1 
 00fc 20 e2		    JR NZ,read_another_boot_sector 
-00fe			    ; Yes, track 0 completed. Continue with track 1, sector 10 
-00fe 0e 10		    LD C,0x10                                     
-0100 c5			    PUSH BC 
+00fe			   ; Yes, track 0 completed. Continue with track 1 
+00fe			    ; Skip the 16 sectors used for the directory 
+00fe 0e 10		    LD C, double_density_sectors_for_directory                                 
+0100 c5			     PUSH BC 
 0101			    ; Move to track 1 
 0101 01 01 00		    LD BC,0x0001 
 0104 cd cc 01		    CALL EP_SETTRK 
@@ -619,7 +626,7 @@
 0218			    ; It's an allocated write, we can skip reset the 
 0218			    ; unallocated params to check if a read is needed. 
 0218 c2 32 02		    JP NZ, write_check_read_needed 
-021b 3e 08		    LD A, double_density_sector_size / logical_sector_size ; 8 
+021b 3e 08		    LD A, double_density_block_size / logical_sector_size ; 8 
 021d 32 0b fc		    LD (pending_count),A ; = 8 
 0220			    ; Initialize the unallocated params 
 0220 3a 00 fc		    LD A, (drive_selected) 
@@ -663,7 +670,7 @@
 025a 34			    INC (HL) 
 025b			    ; Are we at the end of the track? 
 025b 7e			    LD A,(HL) 
-025c fe 28		    CP sectors_per_track_double_density 
+025c fe 28		    CP double_density_sectors_per_track 
 025e			    ; No 
 025e da 6a 02		    JP C, write_with_read_not_needed 
 0261			    ; Yes, increase track and set sector to zero 

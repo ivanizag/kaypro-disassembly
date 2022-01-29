@@ -18,11 +18,20 @@
 0000			rom_stack:                  EQU 0xfc00 
 0000			disk_DMA_address:           EQU 0xfc14 ; 2 bytes 
 0000			ram_e407:                   EQU 0xe407 
-0000			 
-0000			sector_size:                EQU 128 
-0000			sectors_per_track:          EQU 40 
 0000			; See CP/M 2.2 System alteration guide appendix G 
 0000			rw_type_directory_write:    EQU 1 
+0000			 
+0000			 
+0000			; Info to reload CP/M from disk 
+0000			; Like on the ROM, it only works with double density disks 
+0000			logical_sector_size:                  EQU 128 
+0000			double_density_sectors_per_track:     EQU 40 
+0000			double_density_sectors_for_directory: EQU 16 
+0000			boot_sectors:                         EQU 44 
+0000			    ; On the actual CP/M 2.2 disks this number is higher 
+0000			    ;   - 48 sectors on CPM 2.2f 
+0000			    ;   - 55 sectors on CPM 2.2 SP or DE 
+0000			 
 0000			 
 0000			ROM_INITDSK:   EQU 0x03 
 0000			ROM_HOME:      EQU 0x0c 
@@ -152,7 +161,7 @@ fabb			    ; Set DMA address to where CP/M must be is
 fabb 21 00 e4		    LD HL, cpm_boot 
 fabe 22 14 fc		    LD (disk_DMA_address), HL 
 fac1			    ; Read 44 sectors, start on sector 1 
-fac1 01 01 2c		    LD BC, 0x2c01 
+fac1 01 01 2c		    LD BC, (boot_sectors * 256) + 1 
 fac4			WBOOT_LOOP: 
 fac4 c5			    PUSH BC 
 fac5 cd 88 fb		    CALL SETSEC 
@@ -164,7 +173,7 @@ facd			    ; Yes, restart at track 0, sector 1
 facd 20 de		    JR NZ, WBOOT_SILENT 
 facf			    ; No, increase DMA by 128 bytes for the next sector 
 facf 2a 14 fc		    LD HL, (disk_DMA_address) 
-fad2 11 80 00		    LD DE, sector_size 
+fad2 11 80 00		    LD DE, logical_sector_size 
 fad5 19			    ADD HL, DE 
 fad6 22 14 fc		    LD (disk_DMA_address), HL 
 fad9			    ; Store 0 in e407. Why? 
@@ -177,14 +186,15 @@ fade ca 7e fa		    JP Z, BOOT_SILENT
 fae1			    ; No, next sector 
 fae1 0c			    INC C 
 fae2			    ; Are we past the last sector of track 0 
-fae2 3e 28		    LD A, sectors_per_track 
+fae2 3e 28		    LD A, double_density_sectors_per_track 
 fae4 b9			    CP C 
 fae5			    ; No, read the next sector 
-fae5 c2 c4 fa		    JP NZ,WBOOT_LOOP 
-fae8			    ; Yes, go to track 1, sector 16 
-fae8 0e 10		    LD C,0x10 
+fae5 c2 c4 fa		    JP NZ, WBOOT_LOOP 
+fae8			    ; Yes, track 0 completed. Continue with track 1 
+fae8			    ; Skip the 16 sectors used for the directory 
+fae8 0e 10		    LD C, double_density_sectors_for_directory                                 
 faea c5			    PUSH BC 
-faeb 0e 01		    LD C,0x1 
+faeb 0e 01		    LD C, 0x1 
 faed cd 84 fb		    CALL SETTRK 
 faf0 c1			    POP BC 
 faf1			    ; Read the next sector 

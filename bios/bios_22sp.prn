@@ -21,10 +21,18 @@
 0000			cpm_warm_boot:              EQU 0xe003 
 0000			bdos_entrypoint:            EQU 0xe806 
 0000			 
-0000			sector_size:                EQU 128 
-0000			sectors_per_track:          EQU 40 
 0000			; See CP/M 2.2 System alteration guide appendix G 
 0000			rw_type_directory_write:    EQU 1 
+0000			 
+0000			; Info to reload CP/M from disk 
+0000			; Like on the ROM, it only works with double density disks 
+0000			logical_sector_size:                  EQU 128 
+0000			double_density_sectors_per_track:     EQU 40 
+0000			double_density_sectors_for_directory: EQU 16 
+0000			boot_sectors:                         EQU 44 
+0000			    ; On the actual CP/M 2.2 disks this number is higher 
+0000			    ;   - 48 sectors on CPM 2.2f 
+0000			    ;   - 55 sectors on CPM 2.2 SP or DE 
 0000			 
 0000			; Values for PENDING_ACCENT 
 0000			pending_accent_none:        EQU 0 
@@ -364,7 +372,7 @@ f774 01 00 e0		    LD BC, cpm_boot
 f777 cd 12 f7		    CALL SETDMA 
 f77a ed 43 7b fa	    LD (DISK_DMA_ADDRESS),BC 
 f77e			    ; Read 44 sectors, start on sector 1 
-f77e 01 01 2c		    LD BC, 0x2c01 
+f77e 01 01 2c		    LD BC, (boot_sectors * 256) + 1 
 f781			WBOOT_LOOP: 
 f781 c5			    PUSH BC 
 f782 cd 0a f7		    CALL SETSEC 
@@ -377,7 +385,7 @@ f78a 20 d0		    JR NZ, WBOOT
 f78c			    ; No, increase DMA by 128 bytes for the next sector 
 f78c c5			    PUSH BC 
 f78d 2a 7b fa		    LD HL, (DISK_DMA_ADDRESS) 
-f790 11 80 00		    LD DE, sector_size 
+f790 11 80 00		    LD DE, logical_sector_size 
 f793 19			    ADD HL, DE 
 f794 22 7b fa		    LD (DISK_DMA_ADDRESS), HL 
 f797 e5			    PUSH HL 
@@ -391,12 +399,13 @@ f79e ca b2 f7		    JP Z, WBOOT_SHOW_MESSAGE_LANGUAGE
 f7a1			    ; No, next sector 
 f7a1 0c			    INC C 
 f7a2			    ; Are we past the last sector of track 0 
-f7a2 3e 28		    LD A, sectors_per_track 
+f7a2 3e 28		    LD A, double_density_sectors_per_track 
 f7a4 b9			    CP C 
 f7a5			    ; No, read the next sector 
 f7a5 20 da		    JR NZ, WBOOT_LOOP 
-f7a7			    ; Yes, go to track 1, sector 16 
-f7a7 0e 10		    LD C, 0x10 
+f7a7			    ; Yes, track 0 completed. Continue with track 1 
+f7a7			    ; Skip the 16 sectors used for the directory 
+f7a7 0e 10		    LD C, double_density_sectors_for_directory                                 
 f7a9 c5			    PUSH BC 
 f7aa 0e 01		    LD C, 0x1 
 f7ac cd 06 f7		    CALL SETTRK 
@@ -891,15 +900,17 @@ fa31			VIDEO_OUT_ESC_ORIG:
 fa31 ..			    DB "|#[\\{@}]" 
 fa39			VIDEO_OUT_ESC_DEST: 
 fa39 c0 cb cf d0 db dc dd df	    DB 0xC0,0xCB,0xCF,0xD0,0xDB,0xDC,0xDD,0xDF 
-fa41			    ;  ñ    £    ¡    Ñ    º    §    ß    ¿ 
+fa41			    ;  ñ    £    ¡    Ñ    º    §    ç    ¿ 
 fa41			 
 fa41			; Application of accents on keyboard input 
 fa41			VOWELS_ACUTE: 
 fa41			    ; Acute accentuation on vowels 
 fa41 c1 c2 c3 c4 c5	    DB 0xC1,0xC2,0xC3,0xC4,0xC5 
+fa46			    ;  á    é    í    ó    ú 
 fa46			VOWELS_DIAERESIS: 
 fa46			    ; Grave accentuation on vowels 
 fa46 d6 d7 d8 d9 da	    DB 0xD6,0xD7,0xD8,0xD9,0xDA 
+fa4b			    ;  ä    ë    ï    ö    ü 
 fa4b			 
 fa4b			WARM_BOOT_MESSAGE_US: 
 fa4b .. 00		    DB "\r\nWarm Boot",0 

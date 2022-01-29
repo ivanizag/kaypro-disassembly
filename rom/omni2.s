@@ -77,10 +77,9 @@ address_vram_start_of_last_line: EQU address_vram_end - console_line_length + 1 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Disk constants
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-logical_sector_size:                EQU 128 ; See NOTES
-double_density_sector_size:         EQU 1024 ; See NOTES
-sectors_per_track_double_density:   EQU 40 ; See NOTES
-tracks_per_side:                    EQU 10 ; See NOTES
+logical_sector_size:                EQU 128
+double_density_block_size:          EQU 1024
+physical_sectors_per_side:          EQU 10
 disk_count:                         EQU 2 ; 0 is A: and 1 is B:
 
 fdc_command_restore:                EQU 0x00
@@ -103,13 +102,20 @@ RET_opcode:	       EQU 0xC9
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; The first boot sector has the info about
-; the rest of the boot sector loading
+; Info to load CP/M on boot.
+; The first boot sector has the info about how many addtional
+; sectors to read and where to store them.
+; Note that boot only works with double density disks. On DD disks,
+; the OS is on the first track and some more sectors after the
+; directory area.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 first_sector_load_address:     EQU 0xfa00
 address_to_load_second_sector: EQU 0xfa02
 address_to_exec_boot:          EQU 0xfa04
 count_of_boot_sectors_needed:  EQU 0xfa06
+
+double_density_sectors_per_track:     EQU 40
+double_density_sectors_for_directory: EQU 16
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -440,13 +446,14 @@ read_another_boot_sector:
     RET Z
     ; Not finished, calculate the next sector and track
     INC C
-    LD A, sectors_per_track_double_density
+    LD A, double_density_sectors_per_track
     ; Are we on the last sector of the track?
     CP C
     ; No, continue reading sector + 1
     JR NZ,read_another_boot_sector
-    ; Yes, track 0 completed. Continue with track 1, sector 16
-    LD C,0x10                                    
+    ; Yes, track 0 completed. Continue with track 1
+    ; Skip the 16 sectors used for the directory
+    LD C, double_density_sectors_for_directory                                
     PUSH BC
     ; Move to track 1
     LD BC,0x0001
@@ -664,7 +671,7 @@ EP_WRITE:
     ; It's an allocated write, we can skip reset the
     ; unallocated params to check if a read is needed.
     JP NZ, write_check_read_needed
-    LD A, double_density_sector_size / logical_sector_size ; 8
+    LD A, double_density_block_size / logical_sector_size ; 8
     LD (pending_count),A ; = 8
     ; Initialize the unallocated params
     LD A, (drive_selected)
@@ -708,7 +715,7 @@ write_check_read_needed:
     INC (HL)
     ; Are we at the end of the track?
     LD A,(HL)
-    CP sectors_per_track_double_density
+    CP double_density_sectors_per_track
     ; No
     JP C, write_with_read_not_needed
     ; Yes, increase track and set sector to zero
@@ -987,7 +994,7 @@ set_double_density_disk:
     ; sector number. On a second side the sector goes from 10 to 29.
     LD A, (disk_read_address_sector)
     ; Is the sector number less than 10?
-    CP tracks_per_side
+    CP physical_sectors_per_side
     LD A, disk_active_has_sides_no
     ; Yes it is less than 10, it's is not a two sided disk
     JR C, second_side_analysis_completed
@@ -1104,7 +1111,7 @@ fdc_set_sector:
     BIT system_bit_side_2, A
     LD A,C
     JR Z, skip_for_side_1
-    ADD A, tracks_per_side ; For tracks on the other side of the disk we add 10 
+    ADD A, physical_sectors_per_side ; For tracks on the other side of the disk we add 10 
 skip_for_side_1:
     OUT (io_12_fdc_sector),A
     RET

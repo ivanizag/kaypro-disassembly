@@ -21,24 +21,32 @@
 0000			cpm_warm_boot:              EQU 0xe003 
 0000			bdos_entrypoint:            EQU 0xe806 
 0000			 
-0000			sector_size:                EQU 128 
-0000			sectors_per_track:          EQU 40 
 0000			; See CP/M 2.2 System alteration guide appendix G 
 0000			rw_type_directory_write:    EQU 1 
+0000			 
+0000			; Info to reload CP/M from disk 
+0000			; Like on the ROM, it only works with double density disks 
+0000			logical_sector_size:                  EQU 128 
+0000			double_density_sectors_per_track:     EQU 40 
+0000			double_density_sectors_for_directory: EQU 16 
+0000			boot_sectors:                         EQU 44 
+0000			    ; On the actual CP/M 2.2 disks this number is higher 
+0000			    ;   - 48 sectors on CPM 2.2f 
+0000			    ;   - 55 sectors on CPM 2.2 SP or DE 
 0000			 
 0000			; Values for PENDING_ACCENT 
 0000			pending_accent_none:        EQU 0 
 0000			pending_accent_acute:       EQU 1 
-0000			pending_accent_diaeresis:       EQU 2 
+0000			pending_accent_diaeresis:   EQU 2 
 0000			 
 0000			; Bits used on the BIOS_CONFIG 
 0000			bios_config_1:              EQU 0 
 0000			    ; 0: disk write mode as requested 
 0000			    ; 1: disk writes to be "directory write" 
-0000			bios_config_5:              EQU 5 ; Modified when using CAMBIO.COM 
-0000			    ; 0: "caracteres españoles (EUR/USASCII)" 
-0000			    ; 1: "caracteres europeos (E-ASCII)" 
-0000			bios_config_6:              EQU 6 ; Modified when using CAMBIO8.COM: 7 or 8 bits mode 
+0000			bios_config_5:              EQU 5 ; Modified with AENDERN.COM 
+0000			    ; 0: "(EUR/USASCII) Buchstaben" 
+0000			    ; 1: "deutsche Buchstaben (D-ASCII) " 
+0000			bios_config_6:              EQU 6 ; Modified with AENDERN8.COM 
 0000			    ; 0: 7 bits mode 
 0000			    ; 1: 8 bits mode 
 0000			bios_config_7:              EQU 7 
@@ -364,7 +372,7 @@ f774 01 00 e0		    LD BC, cpm_boot
 f777 cd 12 f7		    CALL SETDMA 
 f77a ed 43 95 fa	    LD (DISK_DMA_ADDRESS),BC 
 f77e			    ; Read 44 sectors, start on sector 1 
-f77e 01 01 2c		    LD BC, 0x2c01 
+f77e 01 01 2c		    LD BC, (boot_sectors * 256) + 1 
 f781			WBOOT_LOOP: 
 f781 c5			    PUSH BC 
 f782 cd 0a f7		    CALL SETSEC 
@@ -377,7 +385,7 @@ f78a 20 d0		    JR NZ, WBOOT
 f78c			    ; No, increase DMA by 128 bytes for the next sector 
 f78c c5			    PUSH BC 
 f78d 2a 95 fa		    LD HL, (DISK_DMA_ADDRESS) 
-f790 11 80 00		    LD DE, sector_size 
+f790 11 80 00		    LD DE, logical_sector_size 
 f793 19			    ADD HL, DE 
 f794 22 95 fa		    LD (DISK_DMA_ADDRESS), HL 
 f797 e5			    PUSH HL 
@@ -391,12 +399,13 @@ f79e ca b2 f7		    JP Z, WBOOT_SHOW_MESSAGE_LANGUAGE
 f7a1			    ; No, next sector 
 f7a1 0c			    INC C 
 f7a2			    ; Are we past the last sector of track 0 
-f7a2 3e 28		    LD A, sectors_per_track 
+f7a2 3e 28		    LD A, double_density_sectors_per_track 
 f7a4 b9			    CP C 
 f7a5			    ; No, read the next sector 
 f7a5 20 da		    JR NZ, WBOOT_LOOP 
-f7a7			    ; Yes, go to track 1, sector 16 
-f7a7 0e 10		    LD C, 0x10 
+f7a7			    ; Yes, track 0 completed. Continue with track 1 
+f7a7			    ; Skip the 16 sectors used for the directory 
+f7a7 0e 10		    LD C, double_density_sectors_for_directory                                 
 f7a9 c5			    PUSH BC 
 f7aa 0e 01		    LD C, 0x1 
 f7ac cd 06 f7		    CALL SETTRK 
@@ -856,6 +865,7 @@ f9ab .. ff ff ..	    DB "}]|\\{[",0xFF,0xFF,"~@"
 f9b5			LOOKUP_KEY_ALT: 
 f9b5			    ; Alt keyboard layout 
 f9b5 da ce d9 cd d6 cc .. de dc	    DB 0xDA,0xCE,0xD9,0xCD,0xD6,0xCC,"[]",0xde,0xdc 
+f9bf			    ;  ü    Ü    ö    Ö    ä    Ä         ß    §  
 f9bf			LOOKUP_KEY2_US: 
 f9bf			    ; US keyboard layout 
 f9bf .. 19 1a		    DB "@^&*()_y]}z<>/?ZY",0x19,0x1a 
@@ -884,12 +894,12 @@ fa45			    ; Modifed keys on the German keyboard layout
 fa45 ff ff .. ff .. ff .. ff ff .. ff ff	    DB 0xFF,0xFF,"#",0xFF,"^^",0xFF,"'",0xFF,0xFF,"<<>>",0xFF,0xFF 
 fa55			 
 fa55			; Transformation of chars for display accorging to the 
-fa55			; codepage 1023 https://en.wikipedia.org/wiki/Code_page_1023 
+fa55			; codepage 1011 https://en.wikipedia.org/wiki/DIN_66003 
 fa55			VIDEO_OUT_ESC_ORIG: 
 fa55 ..			    DB "[\\]{|}@~" 
 fa5d			VIDEO_OUT_ESC_DEST: 
 fa5d cc cd ce d6 d9 da dc de	    DB 0xCC,0xCD,0xCE,0xD6,0xD9,0xDA,0xDC,0xDE 
-fa65			    ;  ñ    £    ¡    Ñ    º    §    ß    ¿ 
+fa65			    ;  Ä    Ö    Ü    ä    ö    ü    §    ß 
 fa65			 
 fa65			; Application of accents on keyboard input 
 fa65			VOWELS_ACUTE: 
