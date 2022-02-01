@@ -1116,7 +1116,7 @@
 043e			write_retry: 
 043e e5			    PUSH HL 
 043f d5			    PUSH DE 
-0440 cd 92 04		    CALL fcd_seek_sector 
+0440 cd 92 04		    CALL fdc_seek_sector 
 0443 cd f4 fe		    CALL write_from_buffer_relocated 
 0446 d1			    POP DE 
 0447 e1			    POP HL 
@@ -1168,7 +1168,7 @@
 0477 11 0f 04		    LD DE,0x040f ; retry 15 times without seek. Repeat all up to 4 times with seek0 
 047a			read_retry: 
 047a d5			    PUSH DE 
-047b cd 92 04		    CALL fcd_seek_sector 
+047b cd 92 04		    CALL fdc_seek_sector 
 047e			    ; Read 512 bytes 
 047e cd e3 fe		    CALL read_to_buffer_relocated 
 0481 32 10 fc		    LD (rw_result), A 
@@ -1186,7 +1186,7 @@
 048e 1e 0f		    LD E,0xf 
 0490 18 e8		    JR read_retry 
 0492			 
-0492			fcd_seek_sector: 
+0492			fdc_seek_sector: 
 0492			    ; Put the disk to the requested position 
 0492 3a 04 fc		    LD A,(drive_in_fdc) 
 0495 4f			    LD C,A 

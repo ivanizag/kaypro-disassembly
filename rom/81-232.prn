@@ -1063,10 +1063,11 @@
 0422 01 13 06		    LD BC, disk_read_address_buffer_size*0x100 + io_13_fdc_data 
 0425 3e c4		    LD A, fdc_command_read_address 
 0427 d3 10		    OUT (io_10_fdc_command), A 
-0429			wait_for_data: 
+0429			    ; Read the 6 bytes of the address 
+0429			fdc_read_adress_byte: 
 0429 76			    HALT 
 042a ed a2		    INI 
-042c 20 fb		    JR NZ, wait_for_data 
+042c 20 fb		    JR NZ, fdc_read_adress_byte 
 042e cd c4 04		    CALL wait_for_result 
 0431			    ; Is record not found? 
 0431 cb 67		    BIT fdc_status_record_not_found_bit, A 
@@ -1093,7 +1094,10 @@
 044c 3a 19 fe		    LD A, (disk_active_has_sides) 
 044f b7			    OR A 
 0450 28 0f		    JR Z, skip_disk_side_change 
-0452 79			    LD A , C 
+0452			    ; For double sided disks, even tracks are on side 1, 
+0452			    ; odd tracks are on side 2. So the LSB is the side and 
+0452			    ; the real sector is the sector/2. 
+0452 79			    LD A, C 
 0453 1f			    RRA 
 0454 4f			    LD C, A 
 0455 db 1c		    IN A,(io_1c_system_bits) 
@@ -1238,7 +1242,7 @@
 04d1			write_retry: 
 04d1 e5			    PUSH HL 
 04d2 d5			    PUSH DE 
-04d3 cd 25 05		    CALL fcd_seek_sector 
+04d3 cd 25 05		    CALL fdc_seek_sector 
 04d6 cd f8 fe		    CALL write_from_buffer_relocated 
 04d9 d1			    POP DE 
 04da e1			    POP HL 
@@ -1290,7 +1294,7 @@
 050a 11 0f 04		    LD DE,0x040f ; retry 15 times without seek. Repeat all up to 4 times with seek0 
 050d			read_retry: 
 050d d5			    PUSH DE 
-050e cd 25 05		    CALL fcd_seek_sector 
+050e cd 25 05		    CALL fdc_seek_sector 
 0511			    ; Read 512 bytes 
 0511 cd e7 fe		    CALL read_to_buffer_relocated 
 0514 32 10 fc		    LD (rw_result), A 
@@ -1308,7 +1312,7 @@
 0521 1e 0f		    LD E,0xf 
 0523 18 e8		    JR read_retry 
 0525			 
-0525			fcd_seek_sector: 
+0525			fdc_seek_sector: 
 0525			    ; Put the disk to the requested position 
 0525 3a 04 fc		    LD A,(drive_in_fdc) 
 0528 4f			    LD C,A 
