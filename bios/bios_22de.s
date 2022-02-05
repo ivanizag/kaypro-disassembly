@@ -39,9 +39,9 @@ pending_accent_acute:       EQU 1
 pending_accent_diaeresis:   EQU 2
 
 ; Bits used on the BIOS_CONFIG
-bios_config_1:              EQU 0
+bios_config_1:              EQU 0 ; Mofified with CONFIG.COM, option 2
     ; 0: disk write mode as requested
-    ; 1: disk writes to be "directory write"
+    ; 1: disk safe write always
 bios_config_5:              EQU 5 ; Modified with AENDERN.COM
     ; 0: "(EUR/USASCII) Buchstaben"
     ; 1: "deutsche Buchstaben (D-ASCII) "
@@ -156,7 +156,7 @@ WRITE:
     RRCA
     ; Is's false, write as requested
     JR NC, READ_WRITE
-    ; It's true, force the write type
+    ; It's true, force a safe write
     LD C, rw_type_directory_write
     JR READ_WRITE
 
