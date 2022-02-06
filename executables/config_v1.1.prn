@@ -1,0 +1,1366 @@
+# File config_v1.1.s
+0000			 
+0000			RST0:      EQU 0x0000 
+0000			BDOS:      EQU 0x0005 
+0000			    CON_READ:      EQU 0x01 
+0000			    CON_WRITE:     EQU 0x02 
+0000			    CON_RAWIO:     EQU 0x06 
+0000			        CON_RAWIO_PEEK_CHAR: EQU 0xff 
+0000			    CON_WRITESTR:  EQU 0x09 
+0000			    DRV_SET:       EQU 0x0E 
+0000			 
+0000			BIOS_config_byte:       EQU 0xfa34 
+0000			BIOS_WRITE_fa2a:        EQU 0xfa2a 
+0000			BIOS_SETSEC_fa21:       EQU 0xfa21 
+0000			BIOS_SETTRK_fa1e:       EQU 0xfa1e 
+0000			BIOS_SETDMA_fa24:       EQU 0xfa24 
+0000			 
+0000			io_port_00_serial_baud_rate: EQU 0x00 
+0000			 
+0000			bios_config_copy: EQU 0x2b9b ; replace with offset 
+0000			 
+0000			changes_pending_yes:    EQU 0x00 
+0000			changes_pending_no:     EQU 0xff 
+0000			 
+0000			write_safe_yes:         EQU 0xff 
+0000			write_safe_no:          EQU 0x00 
+0000			 
+0000			; ASCII codes 
+0000			no_key:       EQU 0x00 
+0000			line_feed:    EQU 0x0a 
+0000			form_feed:    EQU 0x0c 
+0000			return_key:   EQU 0x0d 
+0000			clear_screen: EQU 0x1a 
+0000			escape:       EQU 0x1b 
+0000			home:         EQU 0x1e 
+0000			 
+0000			ORG 0x0100 
+0100 c3 12 01		    JP          main_menu_reset 
+0103			 
+0103			move_cursor: 
+0103			    ; Output an 0xff terminated string in DE to console 
+0103 1a			    LD          A, (DE) 
+0104 fe ff		    CP          0xff 
+0106 c8			    RET         Z 
+0107 d5			    PUSH        DE 
+0108 0e 02		    LD          C, CON_WRITE 
+010a 5f			    LD          E, A 
+010b cd 05 00		    CALL        BDOS 
+010e d1			    POP         DE 
+010f 13			    INC         DE 
+0110 18 f1		    JR          move_cursor 
+0112			 
+0112			main_menu_reset: 
+0112			    ; The config will be stored in B: 
+0112 3e 01		    LD          A, 0x1 
+0114 32 f5 13		    LD          (disk_drive_destination), A 
+0117			    ; Let's mark that there are no changes to save 
+0117 3e ff		    LD          A, changes_pending_no 
+0119 32 f4 13		    LD          (changes_pending), A 
+011c			main_menu: 
+011c			    ; Show the main menu and select an option 
+011c 0e 09		    LD          C,CON_WRITESTR 
+011e 11 6b 14		    LD          DE,msg_menu_header 
+0121 cd 05 00		    CALL        BDOS 
+0124 0e 09		    LD          C,CON_WRITESTR 
+0126 11 e8 14		    LD          DE,msg_main_menu 
+0129 cd 05 00		    CALL        BDOS 
+012c 0e 01		    LD          C,CON_READ 
+012e cd 05 00		    CALL        BDOS 
+0131 f5			    PUSH        AF 
+0132 0e 09		    LD          C,CON_WRITESTR 
+0134 11 03 14		    LD          DE,msg_new_line 
+0137 cd 05 00		    CALL        BDOS 
+013a f1			    POP         AF 
+013b fe 31		    CP          '1' 
+013d ca 52 0f		    JP          Z,menu_1_iobyte 
+0140 fe 32		    CP          '2' 
+0142 ca c4 0c		    JP          Z,menu_2_write_safe 
+0145 fe 33		    CP          '3' 
+0147 ca 6c 09		    JP          Z,menu_3_cursor_keys 
+014a fe 34		    CP          '4' 
+014c ca 8c 03		    JP          Z,menu_4_keypad 
+014f fe 35		    CP          '5' 
+0151 ca 5c 01		    JP          Z,menu_5_baud_rate 
+0154 fe 1b		    CP          escape 
+0156 ca 36 13		    JP          Z,menu_exit 
+0159 c3 1c 01		    JP          main_menu 
+015c			 
+015c			 
+015c			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+015c			; OPTION 5: Configure the serial port baud rate 
+015c			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+015c			 
+015c			menu_5_baud_rate: 
+015c			    ; Show the baud rate menu and select an option 
+015c 0e 09		    LD          C,CON_WRITESTR 
+015e 11 6b 14		    LD          DE,msg_menu_header 
+0161 cd 05 00		    CALL        BDOS 
+0164 0e 09		    LD          C,CON_WRITESTR 
+0166 11 a7 1a		    LD          DE,msg_baud_rate_menu 
+0169 cd 05 00		    CALL        BDOS 
+016c 0e 01		    LD          C,CON_READ 
+016e cd 05 00		    CALL        BDOS 
+0171 f5			    PUSH        AF 
+0172 0e 09		    LD          C,CON_WRITESTR 
+0174 11 03 14		    LD          DE,msg_new_line 
+0177 cd 05 00		    CALL        BDOS 
+017a f1			    POP         AF 
+017b fe 31		    CP          '1' 
+017d ca 74 03		    JP          Z,menu_5_baud_rate_1_help 
+0180 fe 1b		    CP          escape 
+0182 ca 1c 01		    JP          Z,main_menu 
+0185 fe 32		    CP          '2' 
+0187 ca 8d 01		    JP          Z,menu_5_baud_rate_2_change 
+018a c3 5c 01		    JP          menu_5_baud_rate 
+018d			 
+018d			menu_5_baud_rate_2_change: 
+018d			    ; Show the baud rate change menu 
+018d 0e 09		    LD          C,CON_WRITESTR 
+018f 11 e4 01		    LD          DE,msg_baud_rate_change_menu 
+0192 cd 05 00		    CALL        BDOS 
+0195			baud_rate_selection_reset: 
+0195 3e 00		    LD          A,0x0 
+0197 32 e3 01		    LD          (current_selection),A 
+019a 0e 09		    LD          C,CON_WRITESTR 
+019c 11 6b 03		    LD          DE,msg_form_feeds 
+019f cd 05 00		    CALL        BDOS 
+01a2			baud_rate_selection: 
+01a2 0e 06		    LD          C,CON_RAWIO 
+01a4 1e ff		    LD          E,CON_RAWIO_PEEK_CHAR 
+01a6 cd 05 00		    CALL        BDOS 
+01a9 fe 00		    CP          no_key 
+01ab 28 f5		    JR          Z,baud_rate_selection 
+01ad fe 1b		    CP          escape 
+01af 28 ab		    JR          Z,menu_5_baud_rate 
+01b1 fe 0a		    CP          line_feed 
+01b3 ca ce 01		    JP          Z,baud_rate_selection_next 
+01b6 fe 0d		    CP          return_key 
+01b8 20 e8		    JR          NZ,baud_rate_selection 
+01ba			    ; We have a selection 
+01ba 3a e3 01		    LD          A,(current_selection) 
+01bd fe 10		    CP          0x10 
+01bf d2 a2 01		    JP          NC,baud_rate_selection 
+01c2			    ; The selection is valid 
+01c2			    ; Update the copy of the BIOS with the baud rate 
+01c2 32 ae 2b		    LD          (bios_content_baud_rate),A 
+01c5			    ; Configure the serial port 
+01c5 d3 00		    OUT         (io_port_00_serial_baud_rate),A 
+01c7			    ; Mark that there are changes to save 
+01c7 af			    XOR         A 
+01c8 32 f4 13		    LD          (changes_pending),A 
+01cb c3 5c 01		    JP          menu_5_baud_rate 
+01ce			 
+01ce			baud_rate_selection_next: 
+01ce			    ; Select the next baud rate 
+01ce 3a e3 01		    LD          A,(current_selection) 
+01d1 3c			    INC         A 
+01d2 32 e3 01		    LD          (current_selection),A 
+01d5			    ; If we are past the last option, restart 
+01d5 fe 11		    CP          0x11 
+01d7 28 bc		    JR          Z,baud_rate_selection_reset 
+01d9 0e 09		    LD          C,CON_WRITESTR 
+01db 11 72 03		    LD          DE,msg_line_feed 
+01de cd 05 00		    CALL        BDOS 
+01e1 18 bf		    JR          baud_rate_selection 
+01e3			 
+01e3			current_selection: 
+01e3			    ; Variable uses on all the sections 
+01e3 00			    db          0h 
+01e4			 
+01e4			msg_baud_rate_change_menu: 
+01e4 1a			    db          clear_screen 
+01e5 ..			    db          "   50\r\n" 
+01ec ..			    db          "   75\r\n" 
+01f3 ..			    db          "  110\t\tMove the cursor to the baud rate which\r\n" 
+0222 ..			    db          "  134.5\r\n" 
+022b ..			    db          "  150\t\tyou want to use by typing the [LINE FEED] key.\r\n" 
+0262 ..			    db          "  300\r\n" 
+0269 ..			    db          "  600\r\n" 
+0270 ..			    db          " 1200\t\tWhen the cursor is at the rate you want\r\n" 
+02a0 ..			    db          " 1800\r\n" 
+02a7 ..			    db          " 2000\t\ttype the RETURN key and it will be set.\r\n" 
+02d7 ..			    db          " 2400\r\n" 
+02de ..			    db          " 3600\t\tThe new baud rate will be effective now.\r\n" 
+030f ..			    db          " 4800\r\n" 
+0316 ..			    db          " 7200\r\n" 
+031d ..			    db          " 9600\r\n" 
+0324 ..			    db          "19200\r\n" 
+032b ..			    db          "Type [ESC] key to return to the previous menu (no changes)\r\n\r\n\n$" 
+036b			 
+036b			msg_form_feeds: 
+036b 1e 0c 0c 0c 0c 0c ..	    db          home,form_feed,form_feed,form_feed,form_feed,form_feed,"$" 
+0372			 
+0372			msg_line_feed:  
+0372 ..			    db          "\n$" 
+0374			 
+0374			menu_5_baud_rate_1_help: 
+0374			    ; Show the baud rate help screen 
+0374 0e 09		    LD          C,CON_WRITESTR 
+0376 11 cc 1d		    LD          DE,msg_help_baud_rate 
+0379 cd 05 00		    CALL        BDOS 
+037c 0e 09		    LD          C,CON_WRITESTR 
+037e 11 22 14		    LD          DE,msg_press_any_key 
+0381 cd 05 00		    CALL        BDOS 
+0384 0e 01		    LD          C,CON_READ 
+0386 cd 05 00		    CALL        BDOS 
+0389 c3 5c 01		    JP          menu_5_baud_rate 
+038c			 
+038c			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+038c			; OPTION 4: Configure the keypad mappings 
+038c			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+038c			 
+038c			menu_4_keypad: 
+038c			    ; Show the keypad menu and select an option 
+038c 0e 09		    LD          C,CON_WRITESTR 
+038e 11 6b 14		    LD          DE,msg_menu_header 
+0391 cd 05 00		    CALL        BDOS 
+0394 0e 09		    LD          C,CON_WRITESTR 
+0396 11 e8 19		    LD          DE,msg_keypad_menu 
+0399 cd 05 00		    CALL        BDOS 
+039c 0e 01		    LD          C,CON_READ 
+039e cd 05 00		    CALL        BDOS 
+03a1 f5			    PUSH        AF 
+03a2 0e 09		    LD          C,CON_WRITESTR 
+03a4 11 03 14		    LD          DE,msg_new_line 
+03a7 cd 05 00		    CALL        BDOS 
+03aa f1			    POP         AF 
+03ab fe 31		    CP          '1' 
+03ad ca 54 09		    JP          Z,menu_4_keypad_1_help 
+03b0 fe 32		    CP          '2' 
+03b2 ca 70 04		    JP          Z,menu_4_keypad_2_change 
+03b5 fe 1b		    CP          escape 
+03b7 ca 1c 01		    JP          Z,main_menu 
+03ba c3 8c 03		    JP          menu_4_keypad 
+03bd			 
+03bd			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+03bd			; HEX INPUT: 
+03bd			; Used on options 3 and 4 to retreive an hex value 
+03bd			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+03bd			 
+03bd			key_selection_input: 
+03bd			    ; Set the next key to map 
+03bd 3a e3 01		    LD          A,(current_selection) 
+03c0 3c			    INC         A 
+03c1 32 e3 01		    LD          (current_selection),A 
+03c4			    ; Retrieve the HEX mapping 
+03c4 cd e6 03		    CALL        key_edit_H 
+03c7			    ; Store the key if there is data 
+03c7 20 09		    JR          NZ,store_key_change 
+03c9			    ; Return to the sequence if we had a line feed 
+03c9 fe 0a		    CP          line_feed 
+03cb c8			    RET         Z 
+03cc			    ; We are done, back to the previous menu 
+03cc e1			    POP         HL 
+03cd 2a ff 13		    LD          HL,(menu_escape_address) 
+03d0 e9			    JP          (HL) 
+03d1			 
+03d1			    ; unused 
+03d1 c8			    db          0xC8 
+03d2			 
+03d2			store_key_change:; 
+03d2			    ; Mark that there are changes to save 
+03d2 3e 00		    LD          A,changes_pending_yes 
+03d4 32 f4 13		    LD          (changes_pending),A 
+03d7			    ; Calculate the position on the BIOS copy to store the mapping 
+03d7			    ; HL has the section and we offset with the selection - 1 
+03d7 11 00 00		    LD          DE,0x0 
+03da 3a e3 01		    LD          A,(current_selection) 
+03dd 3d			    DEC         A 
+03de 5f			    LD          E,A 
+03df 2a f8 13		    LD          HL,(key_config_base_address) 
+03e2 19			    ADD         HL,DE 
+03e3 79			    LD          A,C 
+03e4			    ; Store it 
+03e4 77			    LD          (HL),A 
+03e5 c9			    RET 
+03e6			 
+03e6			key_edit_H: 
+03e6 0e 06		    LD          C,CON_RAWIO 
+03e8 1e ff		    LD          E,CON_RAWIO_PEEK_CHAR 
+03ea cd 05 00		    CALL        BDOS 
+03ed fe 00		    CP          no_key 
+03ef 28 f5		    JR          Z,key_edit_H 
+03f1 fe 0a		    CP          line_feed 
+03f3 c8			    RET         Z 
+03f4 fe 1b		    CP          escape 
+03f6 c8			    RET         Z 
+03f7			    ; If less than '0' ignore the key press 
+03f7 fe 30		    CP          '0' 
+03f9 38 eb		    JR          C,key_edit_H 
+03fb			    ; Is it '9' or less? 
+03fb fe 3a		    CP          '9' + 1 
+03fd			    ; Yes, it is a decimal digit between 0 and 9 
+03fd 38 16		    JR          C,key_decimal_digit_H 
+03ff			    ; No, it must be A to F, if not we will ignore the key press 
+03ff			    ; To lowercase 
+03ff cb af		    RES         0x5,A 
+0401 fe 47		    CP          'F' + 1 
+0403 30 e1		    JR          NC,key_edit_H 
+0405 fe 41		    CP          'A' 
+0407 38 dd		    JR          C,key_edit_H 
+0409			    ; It is an hex digit, echo it 
+0409 f5			    PUSH        AF 
+040a 0e 02		    LD          C,CON_WRITE 
+040c 5f			    LD          E,A 
+040d cd 05 00		    CALL        BDOS 
+0410 f1			    POP         AF 
+0411			    ; substract 7 to have A-F just after 0-9 
+0411 d6 07		    SUB         'A' - '9' - 1 
+0413 18 08		    JR          key_process_digit_H 
+0415			 
+0415			key_decimal_digit_H: 
+0415			    ; It is a decimal digit, echo it 
+0415 f5			    PUSH        AF 
+0416 0e 02		    LD          C,CON_WRITE 
+0418 5f			    LD          E,A 
+0419 cd 05 00		    CALL        BDOS 
+041c f1			    POP         AF 
+041d			 
+041d			key_process_digit_H: 
+041d			    ; Convert the ASCII digit to a number  
+041d d6 30		    SUB         '0' 
+041f			    ; Set it as the high nibble 
+041f cb 07		    RLC         A 
+0421 cb 07		    RLC         A 
+0423 cb 07		    RLC         A 
+0425 cb 07		    RLC         A 
+0427 e6 f0		    AND         0xf0 
+0429 f5			    PUSH        AF 
+042a			 
+042a			key_edit_L: 
+042a 0e 06		    LD          C,CON_RAWIO 
+042c 1e ff		    LD          E,CON_RAWIO_PEEK_CHAR 
+042e cd 05 00		    CALL        BDOS 
+0431 fe 00		    CP          no_key 
+0433 28 f5		    JR          Z,key_edit_L 
+0435 fe 0a		    CP          line_feed 
+0437 28 04		    JR          Z,key_edit_L_cancel 
+0439 fe 1b		    CP          escape 
+043b 20 02		    JR          NZ,key_edit_L_continue 
+043d			key_edit_L_cancel: 
+043d e1			    POP         HL 
+043e c9			    RET 
+043f			key_edit_L_continue: 
+043f			    ; If less than '0' ignore the key press 
+043f fe 30		    CP          '0' 
+0441 38 e7		    JR          C,key_edit_L 
+0443			    ; Is it '9' or less? 
+0443 fe 3a		    CP          '9' + 1 
+0445			    ; Yes, it is a decimal digit between 0 and 9 
+0445 38 16		    JR          C,key_decimal_digit_L 
+0447			    ; No, it must be A to F, if not we will ignore the key press 
+0447			    ; To lowercase 
+0447 cb af		    RES         0x5,A 
+0449 fe 47		    CP          'F' + 1 
+044b 30 dd		    JR          NC,key_edit_L 
+044d fe 41		    CP          'A' 
+044f 38 d9		    JR          C,key_edit_L 
+0451 f5			    PUSH        AF 
+0452			    ; It is an hex digit, echo it 
+0452 0e 02		    LD          C,CON_WRITE 
+0454 5f			    LD          E,A 
+0455 cd 05 00		    CALL        BDOS 
+0458 f1			    POP         AF 
+0459			    ; substract 7 to have A-F just after 0-9 
+0459 d6 07		    SUB         'A' - '9' - 1 
+045b 18 08		    JR          key_process_digit_L 
+045d			 
+045d			key_decimal_digit_L: 
+045d			    ; It is a decimal digit, echo it 
+045d f5			    PUSH        AF 
+045e 0e 02		    LD          C,CON_WRITE 
+0460 5f			    LD          E,A 
+0461 cd 05 00		    CALL        BDOS 
+0464 f1			    POP         AF 
+0465			 
+0465			key_process_digit_L: 
+0465			    ; Convert the ASCII digit to a number 
+0465 d6 30		    SUB         '0' 
+0467			    ; Set it as the low nibble 
+0467 e6 0f		    AND         0xf 
+0469 4f			    LD          C,A 
+046a f1			    POP         AF 
+046b b1			    OR          C 
+046c 4f			    LD          C,A 
+046d c0			    RET         NZ 
+046e 3c			    INC         A 
+046f c9			    RET 
+0470			 
+0470			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0470			; OPTION 4: Configure the keypad mappings (continued) 
+0470			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0470			 
+0470			menu_4_keypad_2_change: 
+0470			    ; Set the address of the previous menu 
+0470 21 8c 03		    LD          HL,menu_4_keypad 
+0473 22 ff 13		    LD          (menu_escape_address),HL 
+0476			    ; Set the address of the key mapping to change 
+0476 21 a0 2b		    LD          HL,bios_content_keypad_map 
+0479 22 f8 13		    LD          (key_config_base_address),HL 
+047c			    ; Show the menu 
+047c 0e 09		    LD          C,CON_WRITESTR 
+047e 11 24 05		    LD          DE,msg_keypad_change_menu 
+0481 cd 05 00		    CALL        BDOS 
+0484			 
+0484			keypad_sequence: 
+0484			    ; Move through the keypad sequence 
+0484 3e 00		    LD          A,0x0 
+0486 32 e3 01		    LD          (current_selection),A 
+0489 11 09 09		    LD          DE,keypad_options_positions 
+048c cd 03 01		    CALL        move_cursor 
+048f cd bd 03		    CALL        key_selection_input 
+0492 11 0e 09		    LD          DE,keypad_options_positions+5 
+0495 cd 03 01		    CALL        move_cursor 
+0498 cd bd 03		    CALL        key_selection_input 
+049b 11 13 09		    LD          DE,keypad_options_positions+10 
+049e cd 03 01		    CALL        move_cursor 
+04a1 cd bd 03		    CALL        key_selection_input 
+04a4 11 18 09		    LD          DE,keypad_options_positions+15 
+04a7 cd 03 01		    CALL        move_cursor 
+04aa cd bd 03		    CALL        key_selection_input 
+04ad 11 1d 09		    LD          DE,keypad_options_positions+20 
+04b0 cd 03 01		    CALL        move_cursor 
+04b3 cd bd 03		    CALL        key_selection_input 
+04b6 11 22 09		    LD          DE,keypad_options_positions+25 
+04b9 cd 03 01		    CALL        move_cursor 
+04bc cd bd 03		    CALL        key_selection_input 
+04bf 11 27 09		    LD          DE,keypad_options_positions+30 
+04c2 cd 03 01		    CALL        move_cursor 
+04c5 cd bd 03		    CALL        key_selection_input 
+04c8 11 2c 09		    LD          DE,keypad_options_positions+35 
+04cb cd 03 01		    CALL        move_cursor 
+04ce cd bd 03		    CALL        key_selection_input 
+04d1 11 31 09		    LD          DE,keypad_options_positions+40 
+04d4 cd 03 01		    CALL        move_cursor 
+04d7 cd bd 03		    CALL        key_selection_input 
+04da 11 36 09		    LD          DE,keypad_options_positions+45 
+04dd cd 03 01		    CALL        move_cursor 
+04e0 cd bd 03		    CALL        key_selection_input 
+04e3 11 3b 09		    LD          DE,keypad_options_positions+50 
+04e6 cd 03 01		    CALL        move_cursor 
+04e9 cd bd 03		    CALL        key_selection_input 
+04ec 11 40 09		    LD          DE,keypad_options_positions+55 
+04ef cd 03 01		    CALL        move_cursor 
+04f2 cd bd 03		    CALL        key_selection_input 
+04f5 11 45 09		    LD          DE,keypad_options_positions+60 
+04f8 cd 03 01		    CALL        move_cursor 
+04fb cd bd 03		    CALL        key_selection_input 
+04fe 11 4a 09		    LD          DE,keypad_options_positions+65 
+0501 cd 03 01		    CALL        move_cursor 
+0504 cd bd 03		    CALL        key_selection_input 
+0507 11 4f 09		    LD          DE,keypad_options_positions+70 
+050a cd 03 01		    CALL        move_cursor 
+050d			keypad_selection_esc: 
+050d			    ; The cursor is on the top of the ESC option 
+050d 0e 06		    LD          C,CON_RAWIO 
+050f 1e ff		    LD          E,CON_RAWIO_PEEK_CHAR 
+0511 cd 05 00		    CALL        BDOS 
+0514 fe 00		    CP          no_key 
+0516 28 f5		    JR          Z,keypad_selection_esc 
+0518 fe 1b		    CP          escape 
+051a ca 8c 03		    JP          Z,menu_4_keypad 
+051d fe 0a		    CP          line_feed 
+051f 20 ec		    JR          NZ,keypad_selection_esc 
+0521			    ; Restart the sequence 
+0521 c3 84 04		    JP          keypad_sequence 
+0524			 
+0524			msg_keypad_change_menu: 
+0524 1a			    db          clear_screen 
+0525 ..			    db          "-----------------------------\tMove the cursor to the key you wish\r\n" 
+0568 ..			    db          ":      :      :      :      :\r\n" 
+0587 ..			    db          ":   7  :   8  :   9  :   -  :\tto change. Use the [LINE FEED] key.\r\n" 
+05ca ..			    db          ":      :      :      :      :\r\n" 
+05e9 ..			    db          ":  37  :  38  :  39  :  2D  :\tThe default HEXADECIMAL code will be\r\n" 
+062d ..			    db          ";------;------;------;------:\r\n" 
+064c ..			    db          ":      :      :      :      :\tthe number which is flashing.\r\n" 
+0689 ..			    db          ":   4  :   5  :   6  :   ,  :\r\n" 
+06a8 ..			    db          ":      :      :      :      :\r\n" 
+06c7 ..			    db          ":  34  :  35  :  36  :  2C  :\tWhen you reach the key you wish to change.\r\n" 
+0711 ..			    db          ":------:------:------:------:\r\n" 
+0730 ..			    db          ":      :      :      :      :\tType in the new HEXADECIMAL code.\r\n" 
+0771 ..			    db          ":   1  :   2  :   3  :      :\r\n" 
+0790 ..			    db          ":      :      :      :      :\r\n" 
+07af ..			    db          ":  31  :  32  :  33  : ENTER:\t(* NOTE: you must enter both digits *)\r\n" 
+07f5 ..			    db          ":------:------:------:      :\r\n" 
+0814 ..			    db          ":             :      :  0D  :\t(*       to change the code.        *)\r\n" 
+085a ..			    db          ":      0      :   .  :      :\r\n" 
+0879 ..			    db          ":             :      :      :\r\n" 
+0898 ..			    db          ":     30      :  2E  :      : Type the [ESC] key to return to the previous menu\r\n" 
+08e9 ..			    db          "-----------------------------\r\n$" 
+0909			keypad_options_positions: 
+0909 1b .. ff		    db          0x1B,"=3&",0xFF 
+090e 1b .. ff		    db          0x1B,"=.#",0xFF 
+0913 1b .. ff		    db          0x1B,"=.*",0xFF 
+0918 1b .. ff		    db          0x1B,"=.1",0xFF 
+091d 1b .. ff		    db          0x1B,"=)#",0xFF 
+0922 1b .. ff		    db          0x1B,"=)*",0xFF 
+0927 1b .. ff		    db          0x1B,"=)1",0xFF 
+092c 1b .. ff		    db          0x1B,"=$#",0xFF 
+0931 1b .. ff		    db          0x1B,"=$*",0xFF 
+0936 1b .. ff		    db          0x1B,"=$1",0xFF 
+093b 1b .. ff		    db          0x1B,"=$8",0xFF 
+0940 1b .. ff		    db          0x1B,"=)8",0xFF 
+0945 1b .. ff		    db          0x1B,"=08",0xFF 
+094a 1b .. ff		    db          0x1B,"=31",0xFF 
+094f 1b .. ff		    db          0x1B,"=3I",0xFF 
+0954			 
+0954			menu_4_keypad_1_help: 
+0954			    ; Show the help for keypad configuration 
+0954 0e 09		    LD          C,CON_WRITESTR 
+0956 11 ca 1b		    LD          DE,msg_help_keypad 
+0959 cd 05 00		    CALL        BDOS 
+095c 0e 09		    LD          C,CON_WRITESTR 
+095e 11 22 14		    LD          DE,msg_press_any_key 
+0961 cd 05 00		    CALL        BDOS 
+0964 0e 01		    LD          C,CON_READ 
+0966 cd 05 00		    CALL        BDOS 
+0969 c3 8c 03		    JP          menu_4_keypad 
+096c			 
+096c			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+096c			; OPTION 3: Configure the corsor keys mappings 
+096c			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+096c			 
+096c			menu_3_cursor_keys: 
+096c			    ; Show the cursor keys menu and select the option 
+096c 0e 09		    LD          C,CON_WRITESTR 
+096e 11 6b 14		    LD          DE,msg_menu_header 
+0971 cd 05 00		    CALL        BDOS 
+0974 0e 09		    LD          C,CON_WRITESTR 
+0976 11 35 19		    LD          DE,msg_cursor_keys_menu 
+0979 cd 05 00		    CALL        BDOS 
+097c 0e 01		    LD          C,CON_READ 
+097e cd 05 00		    CALL        BDOS 
+0981 f5			    PUSH        AF 
+0982 0e 09		    LD          C,CON_WRITESTR 
+0984 11 03 14		    LD          DE,msg_new_line 
+0987 cd 05 00		    CALL        BDOS 
+098a f1			    POP         AF 
+098b fe 31		    CP          '1' 
+098d ca f9 09		    JP          Z,menu_3_cursor_keys_1_help 
+0990 fe 1b		    CP          escape 
+0992 ca 1c 01		    JP          Z,main_menu 
+0995 fe 32		    CP          '2' 
+0997 ca 9c 09		    JP          Z,menu_3_cursor_keys_2_change 
+099a 18 d0		    JR          menu_3_cursor_keys 
+099c			 
+099c			menu_3_cursor_keys_2_change: 
+099c			    ; Set the address of the keypad mapping to change 
+099c 21 9c 2b		    LD          HL,bios_content_arrow_key_map 
+099f 22 f8 13		    LD          (key_config_base_address),HL 
+09a2			    ; Set the address of the previous menu 
+09a2 21 6c 09		    LD          HL,menu_3_cursor_keys 
+09a5 22 ff 13		    LD          (menu_escape_address),HL 
+09a8			    ; Show the menu 
+09a8 0e 09		    LD          C,CON_WRITESTR 
+09aa 11 11 0a		    LD          DE,msg_cursor_keys_change_menu 
+09ad cd 05 00		    CALL        BDOS 
+09b0			 
+09b0			cursor_keys_sequence: 
+09b0			    ; Move through the cursor keys sequence 
+09b0 3e 00		    LD          A,0x0 
+09b2 32 e3 01		    LD          (current_selection),A 
+09b5 11 ab 0c		    LD          DE,cursor_keys_options_positions 
+09b8 cd 03 01		    CALL        move_cursor 
+09bb cd bd 03		    CALL        key_selection_input 
+09be 11 b0 0c		    LD          DE,cursor_keys_options_positions+5 
+09c1 cd 03 01		    CALL        move_cursor 
+09c4 cd bd 03		    CALL        key_selection_input 
+09c7 11 b5 0c		    LD          DE,cursor_keys_options_positions+10 
+09ca cd 03 01		    CALL        move_cursor 
+09cd cd bd 03		    CALL        key_selection_input 
+09d0 11 ba 0c		    LD          DE,cursor_keys_options_positions+15 
+09d3 cd 03 01		    CALL        move_cursor 
+09d6 cd bd 03		    CALL        key_selection_input 
+09d9 11 bf 0c		    LD          DE,cursor_keys_options_positions+20 
+09dc cd 03 01		    CALL        move_cursor 
+09df			cursor_keys_selection_esc: 
+09df			    ; The cursor is on top of the ESC option 
+09df 0e 06		    LD          C,CON_RAWIO 
+09e1 1e ff		    LD          E,CON_RAWIO_PEEK_CHAR 
+09e3 cd 05 00		    CALL        BDOS 
+09e6 fe 00		    CP          no_key 
+09e8 28 f5		    JR          Z,cursor_keys_selection_esc 
+09ea fe 0a		    CP          line_feed 
+09ec ca b0 09		    JP          Z,cursor_keys_sequence 
+09ef fe 1b		    CP          escape 
+09f1 20 ec		    JR          NZ,cursor_keys_selection_esc 
+09f3 c3 6c 09		    JP          menu_3_cursor_keys 
+09f6			    ; Restart the sequence 
+09f6 c3 b0 09		    JP          cursor_keys_sequence 
+09f9			 
+09f9			menu_3_cursor_keys_1_help: 
+09f9			    ; Show the help for cursor keys configuration 
+09f9 0e 09		    LD          C,CON_WRITESTR 
+09fb 11 46 28		    LD          DE,msg_help_cursor_keys 
+09fe cd 05 00		    CALL        BDOS 
+0a01 0e 09		    LD          C,CON_WRITESTR 
+0a03 11 22 14		    LD          DE,msg_press_any_key 
+0a06 cd 05 00		    CALL        BDOS 
+0a09 0e 01		    LD          C,CON_READ 
+0a0b cd 05 00		    CALL        BDOS 
+0a0e c3 6c 09		    JP          menu_3_cursor_keys 
+0a11			 
+0a11			msg_cursor_keys_change_menu: 
+0a11 1a			    db          clear_screen 
+0a12 ..			    db          "\r\n" 
+0a14 ..			    db          "\r\n" 
+0a16 ..			    db          "            ---------------------------------\r\n" 
+0a45 ..			    db          "            :       :       :       :       :\r\n" 
+0a74 ..			    db          "            :   ^   :   :   :  <-   :  ->   :\r\n" 
+0aa3 ..			    db          "            :   :   :   v   :       :       :\r\n" 
+0ad2 ..			    db          "            :       :       :       :       :\r\n" 
+0b01 ..			    db          "            :  0B   :  0A   :  08   :  0C   :\r\n" 
+0b30 ..			    db          "            ---------------------------------\r\n" 
+0b5f ..			    db          "\r\n" 
+0b61 ..			    db          "\r\n" 
+0b63 ..			    db          "       Type the [ESC] key to return to the previous menu.\r\n" 
+0b9e ..			    db          "\r\n" 
+0ba0 ..			    db          " Move the cursor to the key which you wish to change by pressing\r\n" 
+0be2 ..			    db          " the [LINE FEED] key. The default HEXADECIMAL code will be the flashing number.\r\n" 
+0c33 ..			    db          " Type the new HEXADECIMAL number you wish to assign to the key.\r\n" 
+0c74 ..			    db          "\r\n" 
+0c76 ..			    db          " You must type both digits to effect the change.\r\n\r\n$" 
+0cab			 
+0cab			 cursor_keys_options_positions: 
+0cab 1b .. ff		    db          0x1B,"='/",0xFF 
+0cb0 1b .. ff		    db          0x1B,"='7",0xFF 
+0cb5 1b .. ff		    db          0x1B,"='?",0xFF 
+0cba 1b .. ff		    db          0x1B,"='G",0xFF 
+0cbf 1b .. ff		    db          0x1B,"=+2",0xFF 
+0cc4			 
+0cc4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0cc4			; OPTION 2: Configure the write safe flag 
+0cc4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0cc4			 
+0cc4			menu_2_write_safe: 
+0cc4			    ; Show the menu and select the option 
+0cc4 0e 09		    LD          C,CON_WRITESTR 
+0cc6 11 6b 14		    LD          DE,msg_menu_header 
+0cc9 cd 05 00		    CALL        BDOS 
+0ccc 0e 09		    LD          C,CON_WRITESTR 
+0cce 11 81 18		    LD          DE,msg_write_safe_menu 
+0cd1 cd 05 00		    CALL        BDOS 
+0cd4 0e 01		    LD          C,CON_READ 
+0cd6 cd 05 00		    CALL        BDOS 
+0cd9 f5			    PUSH        AF 
+0cda 0e 09		    LD          C,CON_WRITESTR 
+0cdc 11 03 14		    LD          DE,msg_new_line 
+0cdf cd 05 00		    CALL        BDOS 
+0ce2 f1			    POP         AF 
+0ce3 fe 31		    CP          '1' 
+0ce5 ca 6e 0d		    JP          Z,menu_2_write_safe_1_help 
+0ce8 fe 32		    CP          '2' 
+0cea ca f5 0c		    JP          Z,menu_2_write_safe_2_change 
+0ced fe 1b		    CP          escape 
+0cef ca 1c 01		    JP          Z,main_menu 
+0cf2 c3 c4 0c		    JP          menu_2_write_safe 
+0cf5			 
+0cf5			menu_2_write_safe_2_change: 
+0cf5			    ; Show the change menu 
+0cf5 0e 09		    LD          C,CON_WRITESTR 
+0cf7 11 86 0d		    LD          DE,msg_write_safe_change_menu 
+0cfa cd 05 00		    CALL        BDOS 
+0cfd			    ; There is a sequence of three states: YES, NO and ESC 
+0cfd			 
+0cfd			write_safe_yes_option: 
+0cfd			    ; We are on the YES option 
+0cfd 11 43 0f		    LD          DE,write_safe_options_position_yes 
+0d00 cd 03 01		    CALL        move_cursor 
+0d03			write_safe_yes_option_loop: 
+0d03 0e 06		    LD          C,CON_RAWIO 
+0d05 1e ff		    LD          E,CON_RAWIO_PEEK_CHAR 
+0d07 cd 05 00		    CALL        BDOS 
+0d0a fe 00		    CP          no_key 
+0d0c 28 f5		    JR          Z,write_safe_yes_option_loop 
+0d0e fe 0a		    CP          line_feed 
+0d10			    ; Line feed: go to the NO option 
+0d10 28 16		    JR          Z,write_safe_no_option 
+0d12 fe 1b		    CP          escape 
+0d14			    ; Escape: go back to the menu 
+0d14 ca c4 0c		    JP          Z,menu_2_write_safe 
+0d17 fe 0d		    CP          return_key 
+0d19 20 e2		    JR          NZ,write_safe_yes_option 
+0d1b			    ; Return: select the YES option 
+0d1b 3e ff		    LD          A,write_safe_yes 
+0d1d 32 9b 2b		    LD          (bios_config_copy),A 
+0d20 3e 00		    LD          A,changes_pending_yes 
+0d22 32 f4 13		    LD          (changes_pending),A 
+0d25 c3 c4 0c		    JP          menu_2_write_safe 
+0d28			 
+0d28			write_safe_no_option: 
+0d28			    ; We are on the NO option 
+0d28 11 48 0f		    LD          DE,write_safe_options_position_no 
+0d2b cd 03 01		    CALL        move_cursor 
+0d2e			write_safe_no_option_loop: 
+0d2e 0e 06		    LD          C,CON_RAWIO 
+0d30 1e ff		    LD          E,CON_RAWIO_PEEK_CHAR 
+0d32 cd 05 00		    CALL        BDOS 
+0d35 fe 00		    CP          no_key 
+0d37 28 f5		    JR          Z,write_safe_no_option_loop 
+0d39 fe 0a		    CP          line_feed 
+0d3b			    ; Line feed go to the ESC option 
+0d3b 28 13		    JR          Z,write_safe_esc_option 
+0d3d fe 1b		    CP          escape 
+0d3f			    ; Escape: go back to the menu 
+0d3f 28 83		    JR          Z,menu_2_write_safe 
+0d41 fe 0d		    CP          return_key 
+0d43 20 e3		    JR          NZ,write_safe_no_option 
+0d45			    ; Return: select the NO option 
+0d45 3e 00		    LD          A,write_safe_no ; = changes_pending_yes 
+0d47 32 9b 2b		    LD          (bios_config_copy),A 
+0d4a 32 f4 13		    LD          (changes_pending),A 
+0d4d c3 c4 0c		    JP          menu_2_write_safe 
+0d50			 
+0d50			write_safe_esc_option: 
+0d50			    ; We are on the ESC option 
+0d50 11 4d 0f		    LD          DE,write_safe_options_position_esc 
+0d53 cd 03 01		    CALL        move_cursor 
+0d56			write_safe_esc_option_loop: 
+0d56 0e 06		    LD          C,CON_RAWIO 
+0d58 1e ff		    LD          E,CON_RAWIO_PEEK_CHAR 
+0d5a cd 05 00		    CALL        BDOS 
+0d5d fe 00		    CP          no_key 
+0d5f 28 f5		    JR          Z,write_safe_esc_option_loop 
+0d61 fe 1b		    CP          escape 
+0d63			    ; Escape: go back to the menu 
+0d63 ca c4 0c		    JP          Z,menu_2_write_safe 
+0d66 fe 0a		    CP          line_feed 
+0d68 c2 50 0d		    JP          NZ,write_safe_esc_option 
+0d6b			    ; Line feed: go to the YES option 
+0d6b c3 fd 0c		    JP          write_safe_yes_option 
+0d6e			 
+0d6e			menu_2_write_safe_1_help: 
+0d6e			    ; Show the help for write safe flag 
+0d6e 0e 09		    LD          C,CON_WRITESTR 
+0d70 11 36 24		    LD          DE,msg_help_write_safe 
+0d73 cd 05 00		    CALL        BDOS 
+0d76 0e 09		    LD          C,CON_WRITESTR 
+0d78 11 22 14		    LD          DE,msg_press_any_key 
+0d7b cd 05 00		    CALL        BDOS 
+0d7e 0e 01		    LD          C,CON_READ 
+0d80 cd 05 00		    CALL        BDOS 
+0d83 c3 c4 0c		    JP          menu_2_write_safe 
+0d86			 
+0d86			msg_write_safe_change_menu: 
+0d86 1a			    db          clear_screen 
+0d87 ..			    db          "\r\n" 
+0d89 ..			    db          "\r\n" 
+0d8b ..			    db          "\r\n" 
+0d8d ..			    db          "Yes I want Write Safe enabeled.\r\n" 
+0dae ..			    db          "\r\n" 
+0db0 ..			    db          "No do not enable Write Safe.\tThis is the default mode on your KAYPRO II .\r\n" 
+0dfb ..			    db          "\r\n" 
+0dfd ..			    db          "Type the [ESC] key to return to the previous menu.\r\n" 
+0e31 ..			    db          "\r\n" 
+0e33 ..			    db          "\r\n" 
+0e35 ..			    db          "Use the [LINE FEED] key to move the cursor to the mode\r\n" 
+0e6d ..			    db          "which you wish to use and then type the [RETURN] key to\r\n" 
+0ea6 ..			    db          "enter your choice.\r\n" 
+0eba ..			    db          "\r\n" 
+0ebc ..			    db          "**** PLEASE read the help file before you enable Write Safe. ****\r\n" 
+0eff ..			    db          "****        If you do not understand it ASK your dealer.     ****\r\n$" 
+0f43			 
+0f43			write_safe_options_position_yes: 
+0f43 1b .. ff		    db          0x1B,"=# ",0xFF 
+0f48			write_safe_options_position_no: 
+0f48 1b .. ff		    db          0x1B,"=% ",0xFF 
+0f4d			write_safe_options_position_esc: 
+0f4d 1b .. ff		    db          0x1B,"='+",0xFF 
+0f52			 
+0f52			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0f52			; OPTION 1: Configure the IOBYTE 
+0f52			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+0f52			 
+0f52			menu_1_iobyte: 
+0f52			    ; Show the menu and select the option 
+0f52 0e 09		    LD          C,CON_WRITESTR 
+0f54 11 6b 14		    LD          DE,msg_menu_header 
+0f57 cd 05 00		    CALL        BDOS 
+0f5a 0e 09		    LD          C,CON_WRITESTR 
+0f5c 11 db 17		    LD          DE,msg_iobyte_menu 
+0f5f cd 05 00		    CALL        BDOS 
+0f62 0e 01		    LD          C,CON_READ 
+0f64 cd 05 00		    CALL        BDOS 
+0f67 f5			    PUSH        AF 
+0f68 0e 09		    LD          C,CON_WRITESTR 
+0f6a 11 03 14		    LD          DE,msg_new_line 
+0f6d cd 05 00		    CALL        BDOS 
+0f70 f1			    POP         AF 
+0f71 fe 31		    CP          '1' 
+0f73 ca 52 10		    JP          Z,menu_1_iobyte_1_help 
+0f76 fe 32		    CP          '2' 
+0f78 ca 83 0f		    JP          Z,menu_1_iobyte_2_change 
+0f7b fe 1b		    CP          escape 
+0f7d ca 1c 01		    JP          Z,main_menu 
+0f80 c3 52 0f		    JP          menu_1_iobyte 
+0f83			 
+0f83			menu_1_iobyte_2_change: 
+0f83 0e 09		    LD          C,CON_WRITESTR 
+0f85 11 6a 10		    LD          DE,msg_iobyte_change_menu 
+0f88 cd 05 00		    CALL        BDOS 
+0f8b			    ; Set to the address of the IOBYTE on the BIOS copy 
+0f8b 21 9a 2b		    LD          HL,bios_content_io_byte 
+0f8e 22 f8 13		    LD          (key_config_base_address),HL 
+0f91			    ; Set the address of the previous menu 
+0f91 21 52 0f		    LD          HL,menu_1_iobyte 
+0f94 22 ff 13		    LD          (menu_escape_address),HL 
+0f97			iobyte_sequence_CON: 
+0f97 3e 00		    LD          A,0x0 
+0f99 32 e3 01		    LD          (current_selection),A 
+0f9c			    ; Two options to set CON 
+0f9c 11 1d 13		    LD          DE,iobyte_options_position_CON_CRT 
+0f9f cd 03 01		    CALL        move_cursor 
+0fa2 cd dd 0f		    CALL        iobyte_selection_input 
+0fa5 11 22 13		    LD          DE,iobyte_options_position_CON_TTY 
+0fa8 cd 03 01		    CALL        move_cursor 
+0fab cd dd 0f		    CALL        iobyte_selection_input 
+0fae			iobyte_sequence_LST: 
+0fae			    ; Two options to set LST 
+0fae 11 27 13		    LD          DE,iobyte_options_position_LST_LPT 
+0fb1 cd 03 01		    CALL        move_cursor 
+0fb4 cd dd 0f		    CALL        iobyte_selection_input 
+0fb7 11 2c 13		    LD          DE,iobyte_options_position_LST_TTY 
+0fba cd 03 01		    CALL        move_cursor 
+0fbd cd dd 0f		    CALL        iobyte_selection_input 
+0fc0			iobyte_sequence_esc: 
+0fc0 11 31 13		    LD          DE,iobyte_options_position_esc 
+0fc3 cd 03 01		    CALL        move_cursor 
+0fc6			 
+0fc6			iobyte_selection_esc: 
+0fc6 0e 06		    LD          C,CON_RAWIO 
+0fc8 1e ff		    LD          E,CON_RAWIO_PEEK_CHAR 
+0fca cd 05 00		    CALL        BDOS 
+0fcd fe 00		    CP          no_key 
+0fcf 28 f5		    JR          Z,iobyte_selection_esc 
+0fd1 fe 1b		    CP          escape 
+0fd3			    ; Escape: go back to the menu 
+0fd3 ca 52 0f		    JP          Z,menu_1_iobyte 
+0fd6 fe 0a		    CP          line_feed 
+0fd8			    ; Line feed: restart the sequence 
+0fd8 20 ec		    JR          NZ,iobyte_selection_esc 
+0fda c3 97 0f		    JP          iobyte_sequence_CON 
+0fdd			 
+0fdd			iobyte_selection_input: 
+0fdd 0e 06		    LD          C,CON_RAWIO 
+0fdf 1e ff		    LD          E,CON_RAWIO_PEEK_CHAR 
+0fe1 cd 05 00		    CALL        BDOS 
+0fe4 fe 00		    CP          no_key 
+0fe6 28 f5		    JR          Z,iobyte_selection_input 
+0fe8 fe 1b		    CP          escape 
+0fea			    ; No escape, process the key press 
+0fea 20 05		    JR          NZ,iobyte_process_key 
+0fec			    ; Escape: go back to the menu 
+0fec e1			    POP         HL 
+0fed 2a ff 13		    LD          HL,(menu_escape_address) 
+0ff0 e9			    JP          (HL) 
+0ff1			 
+0ff1			iobyte_process_key: 
+0ff1 fe 0a		    CP          line_feed 
+0ff3 20 08		    JR          NZ,iobyte_process_key_continue 
+0ff5			    ; Line feed: continue the sequence 
+0ff5 3a e3 01		    LD          A,(current_selection) 
+0ff8 3c			    INC         A 
+0ff9 32 e3 01		    LD          (current_selection),A 
+0ffc c9			    RET 
+0ffd			iobyte_process_key_continue: 
+0ffd fe 0d		    CP          return_key 
+0fff 20 dc		    JR          NZ,iobyte_selection_input 
+1001			    ; Return key: select the option 
+1001 3e 00		    LD          A,changes_pending_yes 
+1003 32 f4 13		    LD          (changes_pending),A 
+1006			    ; Calculate the address of the function to call. The 
+1006			    ; address is in: 
+1006			    ;      selection_id*2 + iobyte_options_handlers 
+1006 3a e3 01		    LD          A,(current_selection) 
+1009 87			    ADD         A,A ; A = A*2 
+100a 11 00 00		    LD          DE,0x0 
+100d 5f			    LD          E,A 
+100e 21 1b 10		    LD          HL,iobyte_options_handlers 
+1011 19			    ADD         HL,DE 
+1012			    ; Read low byte 
+1012 5e			    LD          E,(HL) 
+1013			    ; Read high byte 
+1013 23			    INC         HL 
+1014 56			    LD          D,(HL) 
+1015 eb			    EX          DE,HL 
+1016 ed 5b f8 13	    LD          DE,(key_config_base_address) 
+101a e9			    JP          (HL) 
+101b			 
+101b			iobyte_options_handlers: 
+101b 23 10		    dw          iobyte_option_handler_CON_CRT 
+101d 33 10		    dw          iobyte_option_handler_CON_TTY 
+101f 41 10		    dw          iobyte_option_handler_LST_LPT 
+1021 4b 10		    dw          iobyte_option_handler_LST_TTY 
+1023			 
+1023			iobyte_option_handler_CON_CRT: 
+1023 1a			    LD          A,(DE) 
+1024			    ; iobyte CONSOLE = 01-CRT 
+1024 cb 8f		    RES         0x1,A 
+1026 cb c7		    SET         0x0,A 
+1028 12			    LD          (DE),A 
+1029			    ; Continue on the LST options 
+1029 21 ae 0f		    LD          HL,iobyte_sequence_LST 
+102c 3e 02		    LD          A,0x2 
+102e 32 e3 01		    LD          (current_selection),A 
+1031 d1			    POP         DE 
+1032 e9			    JP          (HL) 
+1033			 
+1033			iobyte_option_handler_CON_TTY: 
+1033 1a			    LD          A,(DE) 
+1034			    ; iobyte CONSOLE = 00-TTY 
+1034 cb 87		    RES         0x0,A 
+1036 cb 8f		    RES         0x1,A 
+1038 12			    LD          (DE),A 
+1039			    ; Continue on the LST options (just the next one) 
+1039 3a e3 01		    LD          A,(current_selection) 
+103c 3c			    INC         A 
+103d 32 e3 01		    LD          (current_selection),A 
+1040 c9			    RET 
+1041			 
+1041			iobyte_option_handler_LST_LPT: 
+1041 1a			    LD          A,(DE) 
+1042			    ; iobyte LIST = 10-LPT 
+1042 cb b7		    RES         0x6,A 
+1044 cb ff		    SET         0x7,A 
+1046 12			    LD          (DE),A 
+1047			    ; Continue on the ESC option 
+1047 21 c0 0f		    LD          HL,iobyte_sequence_esc 
+104a e9			    JP          (HL) 
+104b			 
+104b			iobyte_option_handler_LST_TTY: 
+104b 1a			    LD          A,(DE) 
+104c			    ; iobyte LIST = 00-TTY 
+104c cb bf		    RES         0x7,A 
+104e cb b7		    RES         0x6,A 
+1050 12			    LD          (DE),A 
+1051			    ; Continue on the ESC option 
+1051 c9			    RET 
+1052			 
+1052			menu_1_iobyte_1_help: 
+1052			    ; Display the help 
+1052 0e 09		    LD          C,CON_WRITESTR 
+1054 11 99 21		    LD          DE,msg_help_iobyte 
+1057 cd 05 00		    CALL        BDOS 
+105a 0e 09		    LD          C,CON_WRITESTR 
+105c 11 22 14		    LD          DE,msg_press_any_key 
+105f cd 05 00		    CALL        BDOS 
+1062 0e 01		    LD          C,CON_READ 
+1064 cd 05 00		    CALL        BDOS 
+1067 c3 52 0f		    JP          menu_1_iobyte 
+106a			 
+106a			msg_iobyte_change_menu: 
+106a 1a			    db          clear_screen 
+106b ..			    db          "\r\n" 
+106d ..			    db          "\r\n" 
+106f ..			    db          "\tDefault settings\tPosibile changes\r\n" 
+1093 ..			    db          "\t----------------\t----------------\r\n" 
+10b7 ..			    db          "\r\n" 
+10b9 ..			    db          "\tCON:=CRT:\t\tCON:=TTY:\tType the [LINE FEED] key to \r\n" 
+10ed ..			    db          "\tLST:=LPT:\t\tLST:=TTY:\tmove the cursor to the mode \r\n" 
+1121 ..			    db          "\tPUN:=TTY:\t\t- none -\tyou wish to select.\r\n" 
+114b ..			    db          "\tRDR:=TTY:\t\t- none -\tThen the RETURN key to enter\r\n" 
+117e ..			    db          "\t\t\t\t\t\tyour selection.\r\n" 
+1195 ..			    db          "\tType the [ESC] key to return to the previous menu.\r\n" 
+11ca ..			    db          "\r\n" 
+11cc ..			    db          "* CON: If you chose CON:=TTY: then all input and output  will be through the\r\n" 
+121a ..			    db          "\tserial connector on the back of your KAYPRO II instead of through the\r\n" 
+1262 ..			    db          "\tkeyboard and the CRT.\r\n" 
+127a ..			    db          "\r\n" 
+127c ..			    db          "\r\n" 
+127e ..			    db          "* LST:\tThis setting will decide wether the output directed at a printer\r\n" 
+12c7 ..			    db          "\twill go through the LPT: (parallel connector) or to the\r\n" 
+1301 ..			    db          "\tTTY: (serial connector).\r\n$" 
+131d			 
+131d			iobyte_options_position_CON_CRT: 
+131d 1b .. ff		    db          0x1B,"=%,",0xFF 
+1322			iobyte_options_position_CON_TTY: 
+1322 1b .. ff		    db          0x1B,"=%D",0xFF 
+1327			iobyte_options_position_LST_LPT: 
+1327 1b .. ff		    db          0x1B,"=&,",0xFF 
+132c			iobyte_options_position_LST_TTY: 
+132c 1b .. ff		    db          0x1B,"=&D",0xFF 
+1331			iobyte_options_position_esc: 
+1331 1b .. ff		    db          0x1B,"=*3",0xFF 
+1336			 
+1336			 
+1336			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+1336			; EXIT AND SAVE 
+1336			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+1336			 
+1336			menu_exit: 
+1336 3a f4 13		    LD          A,(changes_pending) 
+1339 fe ff		    CP          changes_pending_no 
+133b			    ; If changes are pending, ask the user if he wants to save them 
+133b c2 46 13		    JP          NZ,save_changes_menu 
+133e			 
+133e			exit_without_saving_changes: 
+133e			    ; Reset the BIOS config in memory (not on disk) 
+133e			    ; Why? 
+133e 3e 00		    LD          A,write_safe_no 
+1340 32 34 fa		    LD          (BIOS_config_byte),A 
+1343 ca 00 00		    JP          Z,RST0 
+1346			 
+1346			save_changes_menu: 
+1346			    ; Show the YES/NO options 
+1346 0e 09		    LD          C,CON_WRITESTR 
+1348 11 4f 1b		    LD          DE,msg_save_changes_menu 
+134b cd 05 00		    CALL        BDOS 
+134e 0e 01		    LD          C,CON_READ 
+1350 cd 05 00		    CALL        BDOS 
+1353			    ; To uppercase 
+1353 cb af		    RES         0x5,A 
+1355 fe 4e		    CP          'N' 
+1357			    ; If NO, then exit without saving changes 
+1357 ca 3e 13		    JP          Z,exit_without_saving_changes 
+135a fe 59		    CP          'Y' 
+135c 20 e8		    JR          NZ,save_changes_menu 
+135e			    ; If YES, then save changes 
+135e			    ; Set write safe mode in memory to make sure this save is safe 
+135e 3e ff		    LD          A,write_safe_yes 
+1360 32 34 fa		    LD          (BIOS_config_byte),A 
+1363			    ; Set drive (B: per the initialization) 
+1363 0e 0e		    LD          C,DRV_SET 
+1365 3a f5 13		    LD          A,(disk_drive_destination) 
+1368 5f			    LD          E,A 
+1369 cd 05 00		    CALL        BDOS 
+136c			    ; Save the updated BIOS to track 1, sectors 15 to 18 
+136c 21 67 2b		    LD          HL,bios_content 
+136f 22 f6 13		    LD          (data_to_write_address),HL 
+1372 01 01 00		    LD          BC,0x1 ; Track 1 
+1375 ed 43 fa 13	    LD          (disk_track_destination),BC 
+1379 01 15 00		    LD          BC,0x15 ; SEctor 15 
+137c ed 43 fc 13	    LD          (disk_sector_destination),BC 
+1380 3e 04		    LD          A,0x4 ; Four sectors, 512 bytes 
+1382 32 fe 13		    LD          (sectors_to_write),A 
+1385 21 80 00		    LD          HL,0x80 ; Each sector is 128 bytes 
+1388 22 01 14		    LD          (logical_sector_size),HL 
+138b			write_sector: 
+138b ed 4b fa 13	    LD          BC,(disk_track_destination) 
+138f cd 1e fa		    CALL        BIOS_SETTRK_fa1e 
+1392 ed 4b f6 13	    LD          BC,(data_to_write_address) 
+1396 cd 24 fa		    CALL        BIOS_SETDMA_fa24 
+1399 ed 4b fc 13	    LD          BC,(disk_sector_destination) 
+139d cd 21 fa		    CALL        BIOS_SETSEC_fa21 
+13a0 0e 00		    LD          C,0x0 
+13a2 cd 2a fa		    CALL        BIOS_WRITE_fa2a 
+13a5 fe 00		    CP          0x0 
+13a7			    ; If successful, proceed with the next sector 
+13a7 28 1d		    JR          Z,write_sector_next 
+13a9			    ; Error 
+13a9			    ; Tell the user 
+13a9 0e 09		    LD          C,CON_WRITESTR 
+13ab 11 44 14		    LD          DE,msg_disk_error 
+13ae cd 05 00		    CALL        BDOS 
+13b1 0e 09		    LD          C,CON_WRITESTR 
+13b3 11 22 14		    LD          DE,msg_press_any_key 
+13b6 cd 05 00		    CALL        BDOS 
+13b9 0e 01		    LD          C,CON_READ 
+13bb cd 05 00		    CALL        BDOS 
+13be			    ; Revert the write safe in memory 
+13be 3e 00		    LD          A,write_safe_no 
+13c0 32 34 fa		    LD          (BIOS_config_byte),A 
+13c3			    ; Back to the main menu 
+13c3 c3 12 01		    JP          main_menu_reset 
+13c6			 
+13c6			write_sector_next: 
+13c6			    ; Point to the next 128 bytes 
+13c6 2a f6 13		    LD          HL,(data_to_write_address) 
+13c9 ed 5b 01 14	    LD          DE,(logical_sector_size) 
+13cd 19			    ADD         HL,DE 
+13ce			    ; Point to the next sector 
+13ce 22 f6 13		    LD          (data_to_write_address),HL 
+13d1 3a fc 13		    LD          A,(disk_sector_destination) 
+13d4 3c			    INC         A 
+13d5 32 fc 13		    LD          (disk_sector_destination),A 
+13d8			    ; Reduce by 1 the sectors pending to write 
+13d8 3a fe 13		    LD          A,(sectors_to_write) 
+13db 3d			    DEC         A 
+13dc 32 fe 13		    LD          (sectors_to_write),A 
+13df fe 00		    CP          0x0 
+13e1			    ; If there are still sectors to write, cotinue writing 
+13e1 c2 8b 13		    JP          NZ,write_sector 
+13e4			    ; We are done 
+13e4 0e 09		    LD          C,CON_WRITESTR 
+13e6 11 06 14		    LD          DE,msg_done 
+13e9 cd 05 00		    CALL        BDOS 
+13ec			    ; Revert the write safe in memory 
+13ec 3e 00		    LD          A,write_safe_no 
+13ee 32 34 fa		    LD          (BIOS_config_byte),A 
+13f1			    ; Back to the main menu 
+13f1 c3 12 01		    JP          main_menu_reset 
+13f4			 
+13f4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+13f4			; VARIABLES 
+13f4			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+13f4			 
+13f4			changes_pending: 
+13f4 00			    db          0h 
+13f5			disk_drive_destination: 
+13f5 00			    db          0h 
+13f6			data_to_write_address: 
+13f6 00 00		    dw          0h 
+13f8			key_config_base_address: 
+13f8 00 00		    dw          0h 
+13fa			disk_track_destination: 
+13fa 00 00		    dw          0h 
+13fc			disk_sector_destination: 
+13fc 00 00		    dw          0h 
+13fe			sectors_to_write: 
+13fe 00			    db          0h 
+13ff			menu_escape_address: 
+13ff 00 00		    dw          0h 
+1401			logical_sector_size: 
+1401 00 00		    dw          0h 
+1403			 
+1403			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+1403			; MESSAGES 
+1403			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+1403			 
+1403			msg_new_line: 
+1403 ..			    db          "\r\n$" 
+1406			msg_done: 
+1406 ..			    db          "\r\nDONE WITH CONFIGURATION\r\n$" 
+1422			msg_press_any_key: 
+1422 ..			    db          "\r\nPlease type any key to continue$" 
+1444			msg_disk_error: 
+1444 ..			    db          "\r\n*** I can't write to your disk ***\r\n$" 
+146b			 
+146b			msg_menu_header: 
+146b 1a			    db          clear_screen 
+146c ..			    db          "\r\n" 
+146e ..			    db          "\r\n" 
+1470 ..			    db          "KAYPRO II  CONFIGURATION PROGRAM   Version 1.1\r\n" 
+14a0 ..			    db          "-----------------------------------------------\r\n" 
+14d1 ..			    db          "\r\n" 
+14d3 ..			    db          "CHOICES\r\n" 
+14dc ..			    db          "-------\r\n\r\n$" 
+14e8			 
+14e8			msg_main_menu: 
+14e8 ..			    db          "1 --------> I/O Byte cold boot defaults\r\n" 
+1511 ..			    db          "2 --------> Write Safe flag\r\n" 
+152e ..			    db          "3 --------> Cursor Keys definitions\r\n" 
+1553 ..			    db          "4 --------> Numerical keypad definitions\r\n" 
+157d ..			    db          "5 --------> Baud rate\r\n" 
+1594 ..			    db          "\r\n" 
+1596 ..			    db          "[ESC] key ----> EXIT this program and return to CP/M\r\n" 
+15cc ..			    db          "\r\n" 
+15ce ..			    db          "(* NOTE: Anything not changed will contain its default value. *)\r\n" 
+1610 ..			    db          "\r\n" 
+1612 ..			    db          "Any changes that this program can make will only affect the disk in drive B.\r\n" 
+1660 ..			    db          "These changes will not be seen until you move the disk to drive A and\r\n" 
+16a7 ..			    db          "push the RESET switch (Cold Boot) or turn the power off and on,\r\n" 
+16e8 ..			    db          "EXCEPT selection '5' (Baud rate) which will have an immediate effect.\r\n" 
+172f ..			    db          "Upon exiting this program you will be asked whether you want to apply\r\n" 
+1776 ..			    db          "the changes to the disk in drive B.\r\n" 
+179b ..			    db          "Please enter '1' or '2' or '3' or '4' or '5' or [ESC] key ====>$" 
+17db			 
+17db			msg_iobyte_menu: 
+17db ..			    db          "1 --------> Help (I/O Byte definitions)\r\n" 
+1804 ..			    db          "\r\n" 
+1806 ..			    db          "2 --------> Change the I/O Byte\r\n" 
+1827 ..			    db          "\r\n" 
+1829 ..			    db          "[ESC] key ----> Return to main menu\r\n" 
+184e ..			    db          "\r\n" 
+1850 ..			    db          "Please enter '1' or '2' or [ESC] key ==========>$" 
+1881			 
+1881			msg_write_safe_menu: 
+1881 ..			    db          "1 --------> Help (Write safe flag definitions)\r\n" 
+18b1 ..			    db          "\r\n" 
+18b3 ..			    db          "2 --------> Change the write safe flag\r\n" 
+18db ..			    db          "\r\n" 
+18dd ..			    db          "[ESC] key ----> Return to main menu\r\n" 
+1902 ..			    db          "\r\n" 
+1904 ..			    db          "Please enter '1' or '2' or [ESC] key ==========>$" 
+1935			 
+1935			msg_cursor_keys_menu: 
+1935 ..			    db          "1 --------> Help (Cursor key definitions)\r\n" 
+1960 ..			    db          "\r\n" 
+1962 ..			    db          "2 --------> Change the Cursor key settings\r\n" 
+198e ..			    db          "\r\n" 
+1990 ..			    db          "[ESC] key ----> Return to main menu\r\n" 
+19b5 ..			    db          "\r\n" 
+19b7 ..			    db          "Please enter '1' or '2' or [ESC] key ==========>$" 
+19e8			 
+19e8			msg_keypad_menu: 
+19e8 ..			    db          "1 --------> Help (Numerical keypad definitions)\r\n" 
+1a19 ..			    db          "\r\n" 
+1a1b ..			    db          "2 --------> Change the Numerical keypad settings\r\n" 
+1a4d ..			    db          "\r\n" 
+1a4f ..			    db          "[ESC] key ----> Return to main menu\r\n" 
+1a74 ..			    db          "\r\n" 
+1a76 ..			    db          "Please enter '1' or '2' or [ESC] key ==========>$" 
+1aa7			 
+1aa7			msg_baud_rate_menu: 
+1aa7 ..			    db          "1 --------> Help (Baud rate definitions)\r\n" 
+1ad1 ..			    db          "\r\n" 
+1ad3 ..			    db          "2 --------> Change the Baud rate\r\n" 
+1af5 ..			    db          "\r\n" 
+1af7 ..			    db          "[ESC] key ----> Return to main menu\r\n" 
+1b1c ..			    db          "\r\n" 
+1b1e ..			    db          "Please enter '1' or '2' or [ESC] key ==========>$" 
+1b4f			 
+1b4f			msg_save_changes_menu: 
+1b4f ..			    db          "\r\n" 
+1b51 ..			    db          "Y----------> procede to update the disk in drive B\r\n" 
+1b85 ..			    db          "N----------> not ready, EXIT TO CP/M\r\n" 
+1bab ..			    db          "\r\n" 
+1bad ..			    db          "Please type (Y) or (N) ====>$" 
+1bca			 
+1bca			msg_help_keypad: 
+1bca 1a			    db          clear_screen 
+1bcb ..			    db          "\r\nOn the right hand side of your KAYPRO II keyboard there is a group of\r\n" 
+1c14 ..			    db          "fourteen keys, labeled:                 7 8 9 -\r\n" 
+1c45 ..			    db          "\t\t\t\t\t4 5 6 ,\r\n" 
+1c53 ..			    db          "\t\t\t\t\t1 2 3 enter\r\n" 
+1c65 ..			    db          "\t\t\t\t\t 0  .\r\n" 
+1c71 ..			    db          "\r\n" 
+1c73 ..			    db          "These fourteen keys each produce a unique code when typed.\r\n" 
+1caf ..			    db          "In some situations it may be useful to have one or more keys  \r\n" 
+1cef ..			    db          "provide a special function, such as in an application\r\n" 
+1d26 ..			    db          "program requiring choices from a menu.\r\n" 
+1d4e ..			    db          "\tThis portion of the CONFIGURATION program allows you to set the\r\n" 
+1d90 ..			    db          "codes which will be produced by these fourteen keys.\r\n\r\n\n\n\n$" 
+1dcc			 
+1dcc			msg_help_baud_rate: 
+1dcc 1a			    db          clear_screen 
+1dcd ..			    db          "\r\n" 
+1dcf ..			    db          "Your KAYPRO II computer has a serial port with which you may communicate\r\n" 
+1e19 ..			    db          "with the outside world. This serial port is most often referred to as\r\n" 
+1e60 ..			    db          "RS-232. In using RS-232 both the computer and the external device\r\n" 
+1ea3 ..			    db          "must be set at the same baud rate (the speed at which data travels)\r\n" 
+1ee8 ..			    db          "\r\n" 
+1eea ..			    db          "\tYour KAYPRO II is capable of the following baud rates:\r\n" 
+1f23 ..			    db          "   50\t\t-not used very often\r\n" 
+1f40 ..			    db          "   75\t\t-not used very often\r\n" 
+1f5d ..			    db          "  110\t\t-used with slower printers\r\n" 
+1f80 ..			    db          "  134.5         -used with some IBM printers\r\n" 
+1fae ..			    db          "  150\t\t-not used very often\r\n" 
+1fcb ..			    db          "  300\t\t-very common (default on your KAYPRO II on reset)\r\n" 
+2005 ..			    db          "  600\t\t-not used very often\r\n" 
+2022 ..			    db          " 1200\t\t-used with many printers\r\n" 
+2043 ..			    db          " 1800\t\t-not used very often\r\n" 
+2060 ..			    db          " 2000\t\t-not used very often\r\n" 
+207d ..			    db          " 2400\t\t-not used very often\r\n" 
+209a ..			    db          " 3600\t\t-not used very often\r\n" 
+20b7 ..			    db          " 4800\t\t-higher rate for faster printers\r\n" 
+20e0 ..			    db          " 7200\t\t-not used very often\r\n" 
+20fd ..			    db          " 9600\t\t-highest rate normally used\r\n" 
+2121 ..			    db          "19200\t\t-very high rate (for special purposes)\r\n" 
+2150 ..			    db          "(* NOTE: the PRESENT baud rate remains in effect until the next RESET *)$" 
+2199			 
+2199			msg_help_iobyte: 
+2199 1a			    db          clear_screen 
+219a ..			    db          "\r\n" 
+219c ..			    db          "In order to understand this command you should read the CP/M manual\r\n" 
+21e1 ..			    db          "\"AN INTRODUCTION TO CP/M FEATURES AND FACILITIES\", the STAT command\r\n" 
+2226 ..			    db          "logical and physical devices. The logical CP/M devices are: CON: LST:\r\n" 
+226d ..			    db          "RDR: and PUN:. The physical devices for the KAYPRO computer are:\r\n" 
+22af ..			    db          "\n\tCRT:\tVideo and Keyboard\r\n" 
+22ca ..			    db          "\tTTY:\tSerial port (note the connector must be wired as in the manual)\r\n" 
+2311 ..			    db          "\tLPT:\tCentronics port\r\n" 
+2328 ..			    db          "\tUL1:\tThis is the same as TTY: above\r\n" 
+234e ..			    db          "\tPTP:\tThis is the same as TTY: above\r\n" 
+2374 ..			    db          "\nPossible logical to physical assignments are:\r\n" 
+23a4 ..			    db          "\n\tCON: =  TTY: or CRT:\r\n" 
+23bc ..			    db          "\tRDR: =  TTY:\r\n" 
+23cb ..			    db          "\tPUN: =  TTY: or CRT: or LPT: or UL1:\r\n" 
+23f2 ..			    db          "\nBEFORE using this option try it with the STAT command in CP/M.\r\n\r\n$" 
+2436			 
+2436			msg_help_write_safe: 
+2436 1a			    db          clear_screen 
+2437 ..			    db          "\r\n" 
+2439 ..			    db          "Your KAYPRO computer comes with a special \"Write Safe\" option that corrects\r\n" 
+2486 ..			    db          "a problem with CP/M when running with SOME application programs. It is not\r\n" 
+24d2 ..			    db          "possible to make the following description nontechnical. If you do not under-\r\n" 
+2521 ..			    db          "stand it, ask your dealer. The wrong setting of the \"Write Safe\" flag may cause\r\n" 
+2572 ..			    db          "the IRREVOCABLE LOSS OF DATA AND OR PROGRAM(S).\r\n" 
+25a3 ..			    db          "\nThe KAYPRO computer uses deblocking. When a disk write operation is\r\n" 
+25e9 ..			    db          "immediately followed by a warm boot, the deblocking buffer may not be\r\n" 
+2630 ..			    db          "written to the disk. This is not a likely sequence of events. Most programs\r\n" 
+267d ..			    db          "when finished writing to a file, will close it. ALL directory operations force\r\n" 
+26cd ..			    db          "the deblock buffer to disk on write. The \"Write Safe\" flag tells the BIOS\r\n" 
+2718 ..			    db          "that ALL disk operations are directory type. This forces the buffer to the\r\n" 
+2764 ..			    db          "disk. The price is performance, as \"Write Safe\" will slow the computer down\r\n" 
+27b1 ..			    db          "from 2 to 4 times when writing to the disk. \"Write Safe\" is not a panacea\r\n" 
+27fc ..			    db          "for system or program problems. The chance you will need it is rare.\r\n\n\r\n$" 
+2846			 
+2846			msg_help_cursor_keys: 
+2846 1a			    db          clear_screen 
+2847 ..			    db          "\r\n" 
+2849 ..			    db          "It is not possible to make the following discription nontechnical.\r\n" 
+288d ..			    db          "If you do not understand it please ask your dealer.\r\n\n" 
+28c3 ..			    db          "Your KAYPRO II computer comes with four arrow keys, they are at the upper right\r\n" 
+2914 ..			    db          "of the main keyboard. They are usually referred to as CURSOR keys. They are \r\n" 
+2962 ..			    db          "used in programs such as SELECT to move the cursor. These keys produce codes\r\n" 
+29b0 ..			    db          "that are recognized by applications programs. The codes that they produce may\r\n" 
+29ff ..			    db          "or may not be the codes that an application you supply wants. The codes sent\r\n" 
+2a4d ..			    db          "by the keyboard are unique, MSB set. The BIOS translates the keyboard codes\r\n" 
+2a9a ..			    db          "using a table in the BIOS. This option of the configure program allows you\r\n" 
+2ae6 ..			    db          "to change the values in this table and record it on the disk. The memory\r\n" 
+2b30 ..			    db          "image is not changed until you cold boot (reset).\r\n\n\r\n$" 
+2b67			 
+2b67			 
+2b67			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+2b67			; BIOS: Local copy of the BIOS 
+2b67			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+2b67			 
+2b67			; This are the BIOS content for CPM 2.2f, US version with 
+2b67			; the KAYPRO II welcome message. See bios_22.s 
+2b67			bios_content: 
+2b67			    ;code 
+2b67 c3 48 fa c3 99 fa c3 f3 fa c3 09 fb c3 2f fb c3	    db          0xC3,0x48,0xFA,0xC3,0x99,0xFA,0xC3,0xF3,0xFA,0xC3,0x09,0xFB,0xC3,0x2F,0xFB,0xC3 
+2b77 48 fb c3 43 fb c3 3e fb c3 7c fb c3 80 fb c3 84	    db          0x48,0xFB,0xC3,0x43,0xFB,0xC3,0x3E,0xFB,0xC3,0x7C,0xFB,0xC3,0x80,0xFB,0xC3,0x84 
+2b87 fb c3 88 fb c3 8c fb c3 90 fb c3 98 fb c3 65 fb	    db          0xFB,0xC3,0x88,0xFB,0xC3,0x8C,0xFB,0xC3,0x90,0xFB,0xC3,0x98,0xFB,0xC3,0x65,0xFB 
+2b97 c3 a8 fb		    db          0xC3,0xA8,0xFB 
+2b9a			 
+2b9a			bios_content_io_byte: 
+2b9a 81			    db          0x81 
+2b9b			bios_content_config_byte: 
+2b9b 00			    db          0x00 
+2b9c			bios_content_arrow_key_map: 
+2b9c 0b 0a 08 0c	    db          0x0B,0x0A,0x08,0x0C 
+2ba0			bios_content_keypad_map: 
+2ba0 30 31 32 33 34 35 36 37 38 39 2d 2c 0d 2e	    db          0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,0x38,0x39,0x2D,0x2C,0x0D,0x2E 
+2bae			bios_content_baud_rate: 
+2bae 05			    db           0x05 
+2baf			    ; more code 
+2baf cd 78 fb af 32 04 00 3a	    db          0xCD,0x78,0xFB,0xAF,0x32,0x04,0x00,0x3A 
+2bb7 33 fa 32 03 00 3a 47 fa d3 00 cd cf fb	    db          0x33,0xFA,0x32,0x03,0x00,0x3A,0x47,0xFA,0xD3,0x00,0xCD,0xCF,0xFB 
+2bc4			bios_content_welcome_message: 
+2bc4 1a .. 00		    db          clear_screen,"\r\nKAYPRO II 64k CP/M vers 2.2\r\n",0 
+2be5			    ; more code 
+2be5 3e c3		    db          0x3E,0xC3 
+2be7 21 03 fa 32 00 00 22 01 00 21 06 ec 32 05 00 22	    db          0x21,0x03,0xFA,0x32,0x00,0x00,0x22,0x01,0x00,0x21,0x06,0xEC,0x32,0x05,0x00,0x22 
+2bf7 06 00 3a 04 00 4f c3 00 e4 cd 78 fb cd cf fb 0d	    db          0x06,0x00,0x3A,0x04,0x00,0x4F,0xC3,0x00,0xE4,0xCD,0x78,0xFB,0xCD,0xCF,0xFB,0x0D 
+2c07 0a 57 61 72 6d 20 42 6f 6f 74 0d 0a 00 31 00 01	    db          0x0A,0x57,0x61,0x72,0x6D,0x20,0x42,0x6F,0x6F,0x74,0x0D,0x0A,0x00,0x31,0x00,0x01 
+2c17 0e 00 cd 80 fb 01 00 00 cd 84 fb 21 00 e4 22 14	    db          0x0E,0x00,0xCD,0x80,0xFB,0x01,0x00,0x00,0xCD,0x84,0xFB,0x21,0x00,0xE4,0x22,0x14 
+2c27 fc 01 01 2c c5 cd 88 fb cd 90 fb c1 b7 20 de 2a	    db          0xFC,0x01,0x01,0x2C,0xC5,0xCD,0x88,0xFB,0xCD,0x90,0xFB,0xC1,0xB7,0x20,0xDE,0x2A 
+2c37 14 fc 11 80 00 19 22 14 fc af 32 07 e4 05 ca 7e	    db          0x14,0xFC,0x11,0x80,0x00,0x19,0x22,0x14,0xFC,0xAF,0x32,0x07,0xE4,0x05,0xCA,0x7E 
+2c47 fa 0c 3e 28 b9 c2 c4 fa 0e 10 c5 0e 01 cd 84 fb	    db          0xFA,0x0C,0x3E,0x28,0xB9,0xC2,0xC4,0xFA,0x0E,0x10,0xC5,0x0E,0x01,0xCD,0x84,0xFB 
+2c57 c1 18 d1 21 db fb 34 cc 28 fb 3a 03 00 e6 03 2e	    db          0xC1,0x18,0xD1,0x21,0xDB,0xFB,0x34,0xCC,0x28,0xFB,0x3A,0x03,0x00,0xE6,0x03,0x2E 
+2c67 33 ca ac fb 2e 2a c3 ac fb cd 28 fb 3a 03 00 e6	    db          0x33,0xCA,0xAC,0xFB,0x2E,0x2A,0xC3,0xAC,0xFB,0xCD,0x28,0xFB,0x3A,0x03,0x00,0xE6 
+2c77 03 2e 36 ca ac fb 2e 2d cd ac fb b7 f0 e6 1f 21	    db          0x03,0x2E,0x36,0xCA,0xAC,0xFB,0x2E,0x2D,0xCD,0xAC,0xFB,0xB7,0xF0,0xE6,0x1F,0x21 
+2c87 35 fa 4f 06 00 09 7e c9 db 1c cb f7 d3 1c c9 3a	    db          0x35,0xFA,0x4F,0x06,0x00,0x09,0x7E,0xC9,0xDB,0x1C,0xCB,0xF7,0xD3,0x1C,0xC9,0x3A 
+2c97 03 00 e6 03 2e 39 ca ac fb 2e 45 c3 ac fb 2e 36	    db          0x03,0x00,0xE6,0x03,0x2E,0x39,0xCA,0xAC,0xFB,0x2E,0x45,0xC3,0xAC,0xFB,0x2E,0x36 
+2ca7 c3 ac fb 2e 39 c3 ac fb 3a 03 00 e6 c0 2e 39 ca	    db          0xC3,0xAC,0xFB,0x2E,0x39,0xC3,0xAC,0xFB,0x3A,0x03,0x00,0xE6,0xC0,0x2E,0x39,0xCA 
+2cb7 ac fb 2e 3f fe 80 ca ac fb 2e 45 fe 40 ca ac fb	    db          0xAC,0xFB,0x2E,0x3F,0xFE,0x80,0xCA,0xAC,0xFB,0x2E,0x45,0xFE,0x40,0xCA,0xAC,0xFB 
+2cc7 2e 39 c3 ac fb 3a 03 00 e6 c0 2e 42 ca ac fb 2e	    db          0x2E,0x39,0xC3,0xAC,0xFB,0x3A,0x03,0x00,0xE6,0xC0,0x2E,0x42,0xCA,0xAC,0xFB,0x2E 
+2cd7 3c fe 80 ca ac fb af c9 2e 03 18 30 2e 0c 18 2c	    db          0x3C,0xFE,0x80,0xCA,0xAC,0xFB,0xAF,0xC9,0x2E,0x03,0x18,0x30,0x2E,0x0C,0x18,0x2C 
+2ce7 2e 0f 18 28 2e 12 18 24 2e 15 18 20 2e 18 18 1c	    db          0x2E,0x0F,0x18,0x28,0x2E,0x12,0x18,0x24,0x2E,0x15,0x18,0x20,0x2E,0x18,0x18,0x1C 
+2cf7 af 32 db fb 2e 1b 18 14 af 32 db fb 2e 1e 3a 34	    db          0xAF,0x32,0xDB,0xFB,0x2E,0x1B,0x18,0x14,0xAF,0x32,0xDB,0xFB,0x2E,0x1E,0x3A,0x34 
+2d07 fa b7 28 08 0e 01 18 04 2e 21 18 00 d9 db 1c cb	    db          0xFA,0xB7,0x28,0x08,0x0E,0x01,0x18,0x04,0x2E,0x21,0x18,0x00,0xD9,0xDB,0x1C,0xCB 
+2d17 ff d3 1c ed 73 dc fb 31 00 fc 11 c2 fb d5 d9 26	    db          0xFF,0xD3,0x1C,0xED,0x73,0xDC,0xFB,0x31,0x00,0xFC,0x11,0xC2,0xFB,0xD5,0xD9,0x26 
+2d27 00 e9 08 ed 7b dc fb db 1c cb bf d3 1c 08 c9 e3	    db          0x00,0xE9,0x08,0xED,0x7B,0xDC,0xFB,0xDB,0x1C,0xCB,0xBF,0xD3,0x1C,0x08,0xC9,0xE3 
+2d37 7e 23 e3 b7 c8 4f cd 2f fb 18 f4	    db          0x7E,0x23,0xE3,0xB7,0xC8,0x4F,0xCD,0x2F,0xFB,0x18,0xF4 
+2d42			    ; BIOS variables and filler. Can be diffent than the BIOS contents on disk. 
+2d42 00 00 00 ac fb	    db          0x00,0x00,0x00,0xAC,0xFB 
+2d47 2e 39 c3 ac fb 3a 03 00 e6 c0 2e 42 ca ac fb 2e	    db          0x2E,0x39,0xC3,0xAC,0xFB,0x3A,0x03,0x00,0xE6,0xC0,0x2E,0x42,0xCA,0xAC,0xFB,0x2E 
+2d57 3c fe 80 ca ac fb af c9 2e 03 18 30 2e 0c 18 2c	    db          0x3C,0xFE,0x80,0xCA,0xAC,0xFB,0xAF,0xC9,0x2E,0x03,0x18,0x30,0x2E,0x0C,0x18,0x2C 
+2d67			 
+2d67			filler: 
+2d67			    ; unused 
+2d67 2e 0f 18 28 2e 12 18 24 2e 15 18 20 2e 18 18 1c	    db          0x2E,0x0F,0x18,0x28,0x2E,0x12,0x18,0x24,0x2E,0x15,0x18,0x20,0x2E,0x18,0x18,0x1C 
+2d77 af 32 db fb 2e 1b 18 14 af	    db          0xAF,0x32,0xDB,0xFB,0x2E,0x1B,0x18,0x14,0xAF 
+# End of file config_v1.1.s
+2d80
