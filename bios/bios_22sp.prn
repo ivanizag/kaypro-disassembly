@@ -40,9 +40,9 @@
 0000			pending_accent_diaeresis:   EQU 2 
 0000			 
 0000			; Bits used on the BIOS_CONFIG 
-0000			bios_config_1:              EQU 0 
+0000			bios_config_1:              EQU 0 ; Mofified with CONFIG.COM, option 2 
 0000			    ; 0: disk write mode as requested 
-0000			    ; 1: disk writes to be "directory write" 
+0000			    ; 1: disk safe write always 
 0000			bios_config_5:              EQU 5 ; Modified when using CAMBIO.COM 
 0000			    ; 0: "caracteres españoles (EUR/USASCII)" 
 0000			    ; 1: "caracteres europeos (E-ASCII)" 
@@ -157,7 +157,7 @@ f656 3a 34 f6		    LD A,(bios_config)
 f659 0f			    RRCA 
 f65a			    ; Is's false, write as requested 
 f65a 30 ee		    JR NC, READ_WRITE 
-f65c			    ; It's true, force the write type 
+f65c			    ; It's true, force a safe write 
 f65c 0e 01		    LD C, rw_type_directory_write 
 f65e 18 ea		    JR READ_WRITE 
 f660			 

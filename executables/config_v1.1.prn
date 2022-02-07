@@ -17,8 +17,6 @@
 0000			 
 0000			io_port_00_serial_baud_rate: EQU 0x00 
 0000			 
-0000			bios_config_copy: EQU 0x2b9b ; replace with offset 
-0000			 
 0000			changes_pending_yes:    EQU 0x00 
 0000			changes_pending_no:     EQU 0xff 
 0000			 
@@ -683,7 +681,7 @@
 0d19 20 e2		    JR          NZ,write_safe_yes_option 
 0d1b			    ; Return: select the YES option 
 0d1b 3e ff		    LD          A,write_safe_yes 
-0d1d 32 9b 2b		    LD          (bios_config_copy),A 
+0d1d 32 9b 2b		    LD          (bios_content_config_byte),A 
 0d20 3e 00		    LD          A,changes_pending_yes 
 0d22 32 f4 13		    LD          (changes_pending),A 
 0d25 c3 c4 0c		    JP          menu_2_write_safe 
@@ -708,7 +706,7 @@
 0d43 20 e3		    JR          NZ,write_safe_no_option 
 0d45			    ; Return: select the NO option 
 0d45 3e 00		    LD          A,write_safe_no ; = changes_pending_yes 
-0d47 32 9b 2b		    LD          (bios_config_copy),A 
+0d47 32 9b 2b		    LD          (bios_content_config_byte),A 
 0d4a 32 f4 13		    LD          (changes_pending),A 
 0d4d c3 c4 0c		    JP          menu_2_write_safe 
 0d50			 

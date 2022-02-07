@@ -8,8 +8,10 @@
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; NOTES: 
 0000			; 
-0000			;   It's the 81-232 ROM with a different message and some twiks 
-0000			; for the characters   
+0000			;   It's the 81-232 ROM with a few differences: 
+0000			; - "OMNI II" instead of "KAYPRO" on the welcome message. 
+0000			; - The cursor does not blink 
+0000			; - The characters used for latin and greek are extended. 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
@@ -76,10 +78,9 @@
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			; Disk constants 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-0000			logical_sector_size:                EQU 128 ; See NOTES 
-0000			double_density_sector_size:         EQU 1024 ; See NOTES 
-0000			sectors_per_track_double_density:   EQU 40 ; See NOTES 
-0000			tracks_per_side:                    EQU 10 ; See NOTES 
+0000			logical_sector_size:                EQU 128 
+0000			double_density_block_size:          EQU 1024 
+0000			physical_sectors_per_side:          EQU 10 
 0000			disk_count:                         EQU 2 ; 0 is A: and 1 is B: 
 0000			 
 0000			fdc_command_restore:                EQU 0x00 
@@ -102,13 +103,20 @@
 0000			 
 0000			 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-0000			; The first boot sector has the info about 
-0000			; the rest of the boot sector loading 
+0000			; Info to load CP/M on boot. 
+0000			; The first boot sector has the info about how many addtional 
+0000			; sectors to read and where to store them. 
+0000			; Note that boot only works with double density disks. On DD disks, 
+0000			; the OS is on the first track and some more sectors after the 
+0000			; directory area. 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 0000			first_sector_load_address:     EQU 0xfa00 
 0000			address_to_load_second_sector: EQU 0xfa02 
 0000			address_to_exec_boot:          EQU 0xfa04 
 0000			count_of_boot_sectors_needed:  EQU 0xfa06 
+0000			 
+0000			double_density_sectors_per_track:     EQU 40 
+0000			double_density_sectors_for_directory: EQU 16 
 0000			 
 0000			 
 0000			;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
@@ -193,6 +201,7 @@
 0000			 
 0000			; On greek mode, the char is converted to a control char that is printed as a greek letter 
 0000			console_alphabet_mask:          EQU 0xfe78 
+0000			 
 0000			; On the 81-232 rom 
 0000			;console_alphabet_ascii_mask:    EQU 0x7f 
 0000			;console_alphabet_greek_mask:    EQU 0x1f 
@@ -438,13 +447,14 @@
 00f7 c8			    RET Z 
 00f8			    ; Not finished, calculate the next sector and track 
 00f8 0c			    INC C 
-00f9 3e 28		    LD A, sectors_per_track_double_density 
+00f9 3e 28		    LD A, double_density_sectors_per_track 
 00fb			    ; Are we on the last sector of the track? 
 00fb b9			    CP C 
 00fc			    ; No, continue reading sector + 1 
 00fc 20 e2		    JR NZ,read_another_boot_sector 
-00fe			    ; Yes, track 0 completed. Continue with track 1, sector 16 
-00fe 0e 10		    LD C,0x10                                     
+00fe			    ; Yes, track 0 completed. Continue with track 1 
+00fe			    ; Skip the 16 sectors used for the directory 
+00fe 0e 10		    LD C, double_density_sectors_for_directory                                 
 0100 c5			    PUSH BC 
 0101			    ; Move to track 1 
 0101 01 01 00		    LD BC,0x0001 
@@ -662,7 +672,7 @@
 0227			    ; It's an allocated write, we can skip reset the 
 0227			    ; unallocated params to check if a read is needed. 
 0227 c2 41 02		    JP NZ, write_check_read_needed 
-022a 3e 08		    LD A, double_density_sector_size / logical_sector_size ; 8 
+022a 3e 08		    LD A, double_density_block_size / logical_sector_size ; 8 
 022c 32 0b fc		    LD (pending_count),A ; = 8 
 022f			    ; Initialize the unallocated params 
 022f 3a 00 fc		    LD A, (drive_selected) 
@@ -706,7 +716,7 @@
 0269 34			    INC (HL) 
 026a			    ; Are we at the end of the track? 
 026a 7e			    LD A,(HL) 
-026b fe 28		    CP sectors_per_track_double_density 
+026b fe 28		    CP double_density_sectors_per_track 
 026d			    ; No 
 026d da 79 02		    JP C, write_with_read_not_needed 
 0270			    ; Yes, increase track and set sector to zero 
@@ -985,7 +995,7 @@
 03d7			    ; sector number. On a second side the sector goes from 10 to 29. 
 03d7 3a cd fe		    LD A, (disk_read_address_sector) 
 03da			    ; Is the sector number less than 10? 
-03da fe 0a		    CP tracks_per_side 
+03da fe 0a		    CP physical_sectors_per_side 
 03dc 3e 00		    LD A, disk_active_has_sides_no 
 03de			    ; Yes it is less than 10, it's is not a two sided disk 
 03de 38 05		    JR C, second_side_analysis_completed 
@@ -1045,10 +1055,11 @@
 0422 01 13 06		    LD BC, disk_read_address_buffer_size*0x100 + io_13_fdc_data 
 0425 3e c4		    LD A, fdc_command_read_address 
 0427 d3 10		    OUT (io_10_fdc_command), A 
-0429			wait_for_data: 
+0429			    ; Read the 6 bytes of the address 
+0429			fdc_read_adress_byte: 
 0429 76			    HALT 
 042a ed a2		    INI 
-042c 20 fb		    JR NZ, wait_for_data 
+042c 20 fb		    JR NZ, fdc_read_adress_byte 
 042e cd c4 04		    CALL wait_for_result 
 0431			    ; Is record not found? 
 0431 cb 67		    BIT fdc_status_record_not_found_bit, A 
@@ -1075,6 +1086,9 @@
 044c 3a 19 fe		    LD A, (disk_active_has_sides) 
 044f b7			    OR A 
 0450 28 0f		    JR Z, skip_disk_side_change 
+0452			    ; For double sided disks, even tracks are on side 1, 
+0452			    ; odd tracks are on side 2. So the LSB is the side and 
+0452			    ; the real sector is the sector/2. 
 0452 79			    LD A , C 
 0453 1f			    RRA 
 0454 4f			    LD C, A 
@@ -1102,7 +1116,7 @@
 046f cb 57		    BIT system_bit_side_2, A 
 0471 79			    LD A,C 
 0472 28 02		    JR Z, skip_for_side_1 
-0474 c6 0a		    ADD A, tracks_per_side ; For tracks on the other side of the disk we add 10  
+0474 c6 0a		    ADD A, physical_sectors_per_side ; For tracks on the other side of the disk we add 10  
 0476			skip_for_side_1: 
 0476 d3 12		    OUT (io_12_fdc_sector),A 
 0478 c9			    RET 

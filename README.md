@@ -17,6 +17,8 @@
 
 [Executables](executables)
 
+- [config.com 11-July-1982](executables/config_1982.s): for BIOS `KAYPRO II \r\n64k CP/M v 2.2`
+- [config.com v1.1](executables/config_v1.1.s): for BIOS `KAYPRO II 64k CP/M vers 2.2`. Adds persistant baud rate changes
 - [cambio.com](executables/cambio.s): Provided by the CP/M in Spanish to select how the BIOS behaves
 - [cambio8.com](executables/cambio8.s): Provided by the CP/M in Spanish to select how the BIOS behaves
 

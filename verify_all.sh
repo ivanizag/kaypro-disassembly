@@ -7,8 +7,11 @@ cd ..
 cd rom
 ./verify.sh 81-149c.s
 ./verify.sh 81-232.s
+./verify.sh omni2.s
 cd ..
 cd executables
+./verify.sh config_v1.1.s
+./verify.sh config_1982.s
 ./verify.sh cambio.s
 ./verify.sh cambio8.s
 cd ..
